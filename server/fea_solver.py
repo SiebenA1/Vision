@@ -80,6 +80,100 @@ def _select_load_triangles(
     )
 
 
+def _clean_stl(source: Path, target: Path) -> dict[str, int]:
+    """Weld duplicate vertices and remove duplicate/degenerate triangles.
+
+    Boolean results can contain coincident tessellation triangles at a seam.
+    An edge shared by four triangles makes Gmsh's surface classification fail
+    before it can create a volume. This is a conservative topology cleanup.
+    """
+    import struct
+
+    data = source.read_bytes()
+    if len(data) < 84:
+        raise ValueError("STL is empty or truncated")
+    count = struct.unpack_from("<I", data, 80)[0]
+    if 84 + count * 50 != len(data):
+        target.write_bytes(data)
+        return {"triangles": count, "removed": 0}
+    coords = []
+    for index in range(count):
+        offset = 84 + index * 50 + 12
+        values = struct.unpack_from("<9f", data, offset)
+        coords.append((values[0:3], values[3:6], values[6:9]))
+    if not coords:
+        raise ValueError("STL has no triangles")
+    xs = [p[0] for tri in coords for p in tri]
+    ys = [p[1] for tri in coords for p in tri]
+    zs = [p[2] for tri in coords for p in tri]
+    diag = math.dist((min(xs), min(ys), min(zs)), (max(xs), max(ys), max(zs)))
+    eps = max(1e-6, diag * 1e-6)
+
+    def key(point: tuple[float, float, float]) -> tuple[int, int, int]:
+        return (
+            round(point[0] / eps),
+            round(point[1] / eps),
+            round(point[2] / eps),
+        )
+
+    vertex_index: dict[tuple[int, int, int], int] = {}
+    vertices: list[tuple[float, float, float]] = []
+    triangles: list[tuple[int, int, int]] = []
+    seen: set[tuple[int, int, int]] = set()
+    removed = 0
+    for tri in coords:
+        indices = []
+        for point in tri:
+            k = key(point)
+            if k not in vertex_index:
+                vertex_index[k] = len(vertices)
+                vertices.append((float(point[0]), float(point[1]), float(point[2])))
+            indices.append(vertex_index[k])
+        if len(set(indices)) != 3:
+            removed += 1
+            continue
+        signature = tuple(sorted(indices))
+        if signature in seen:
+            removed += 1
+            continue
+        seen.add(signature)
+        triangles.append((indices[0], indices[1], indices[2]))
+
+    edge_counts: dict[tuple[int, int], int] = {}
+    for a, b, c in triangles:
+        for u, v in ((a, b), (b, c), (c, a)):
+            edge = (u, v) if u < v else (v, u)
+            edge_counts[edge] = edge_counts.get(edge, 0) + 1
+    non_manifold = [edge for edge, count in edge_counts.items() if count > 2]
+    max_incidence = max(edge_counts.values(), default=0)
+
+    payload = bytearray(b"VISION cleaned STL".ljust(80, b" "))
+    payload += struct.pack("<I", len(triangles))
+    for a, b, c in triangles:
+        pa, pb, pc = vertices[a], vertices[b], vertices[c]
+        ux, uy, uz = pb[0] - pa[0], pb[1] - pa[1], pb[2] - pa[2]
+        vx, vy, vz = pc[0] - pa[0], pc[1] - pa[1], pc[2] - pa[2]
+        nx, ny, nz = uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx
+        length = math.sqrt(nx * nx + ny * ny + nz * nz) or 1.0
+        payload += struct.pack(
+            "<12fH",
+            nx / length, ny / length, nz / length,
+            *pa, *pb, *pc, 0,
+        )
+    target.write_bytes(payload)
+    return {
+        "triangles": len(triangles),
+        "removed": removed,
+        "nonManifoldEdges": len(non_manifold),
+        "maxEdgeIncidence": max_incidence,
+        "firstNonManifoldEdge": (
+            [vertices[non_manifold[0][0]], vertices[non_manifold[0][1]]]
+            if non_manifold
+            else None
+        ),
+    }
+
+
 def _mesh_from_stl(stl_path: Path, mesh_path: Path, mesh_size: float) -> dict[str, Any]:
     gmsh.initialize()
     try:
@@ -204,8 +298,19 @@ def _solve_impl(
     run_dir.mkdir(parents=True, exist_ok=True)
     stl_path = run_dir / "model.stl"
     stl_path.write_bytes(base64.b64decode(stl_base64))
+    clean_path = run_dir / "model_clean.stl"
+    cleanup = _clean_stl(stl_path, clean_path)
+    if cleanup["nonManifoldEdges"] > 0:
+        edge = cleanup.get("firstNonManifoldEdge")
+        raise ValueError(
+            "STL has non-manifold topology: "
+            f"{cleanup['nonManifoldEdges']} edge(s) are shared by more than 2 triangles "
+            f"(max incidence {cleanup['maxEdgeIncidence']}; first edge {edge}). "
+            "This is a boolean/tessellation seam, not a mesh-size problem. "
+            "Union the touching bodies or regenerate the B-Rep so every edge has exactly 2 triangles."
+        )
     mesh_path = run_dir / "model.mesh"
-    mesh = _mesh_from_stl(stl_path, mesh_path, max(0.5, mesh_size))
+    mesh = _mesh_from_stl(clean_path, mesh_path, max(0.5, mesh_size))
     points = mesh["vertices"]
     tets = mesh["tets"]
     tris = mesh["tris"]
@@ -304,6 +409,7 @@ options = {{'output_dir': r"{run_dir}"}}
         "vonMises": nm.asarray(von_mises, dtype=nm.float32).ravel().tolist(),
         "supportArea": 0.0,
         "loadArea": float(area),
+        "stlCleanup": cleanup,
     }
 
 def solve(
