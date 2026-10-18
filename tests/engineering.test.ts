@@ -7,7 +7,7 @@ import { getMaterial } from '../src/core/materials';
 import { parseEngineeringPrompt } from '../src/core/agent/nlu';
 import { buildDeepSeekTools, directionVector } from '../src/core/llm/tools';
 import { isModelDocument, nextProjectCode, seedProjects } from '../src/core/projects';
-import { createBlankModel, createStarterModel, createBrakePedalModel, createWindBladeModel } from '../src/core/templates';
+import { createBlankModel, createStarterModel, createBrakePedalModel, createWindBladeModel, createWheelRimModel } from '../src/core/templates';
 
 describe('parametric geometry kernel', () => {
   it('builds a watertight bracket with positive volume', async () => {
@@ -114,6 +114,16 @@ describe('natural language intent parsing', () => {
     expect(plan.actions[0].tool).toBe('generate_preset');
     expect(plan.actions[0].args.preset).toBe('wind-blade');
   });
+
+  it('maps a car-rim prompt to a parameterized wheel generator', () => {
+    const plan = parseEngineeringPrompt('帮我建模一个 18 英寸、9辐的汽车轮辋：外径 457 mm，宽度 203 mm，PCD 114.3 mm，中心孔 72.6 mm，5 个螺栓孔，材料铝合金 6061-T6。', BRACKET_MODEL);
+    expect(plan.intent).toBe('modeling');
+    expect(plan.actions[0].tool).toBe('create_wheel_rim');
+    expect(plan.actions[0].args.spokeCount).toBe(9);
+    expect(plan.actions[0].args.lugCount).toBe(5);
+    expect(plan.actions[0].args.outerDiameterMm).toBe(457);
+    expect(plan.actions[0].args.widthMm).toBe(203);
+  });
 });
 
 describe('DeepSeek tool contract', () => {
@@ -145,13 +155,14 @@ describe('DeepSeek tool contract', () => {
 });
 
 describe('project library', () => {
-  it('seeds five distinct engineering projects', () => {
+  it('seeds six distinct engineering projects', () => {
     const projects = seedProjects();
-    expect(projects).toHaveLength(5);
-    expect(new Set(projects.map((project) => project.model.code)).size).toBe(5);
+    expect(projects).toHaveLength(6);
+    expect(new Set(projects.map((project) => project.model.code)).size).toBe(6);
     expect(projects.some((project) => project.model.code === 'BRK-042-L')).toBe(true);
     expect(projects.some((project) => project.model.code === 'PEDAL-01')).toBe(true);
     expect(projects.some((project) => project.model.code === 'WT-01')).toBe(true);
+    expect(projects.some((project) => project.model.code === 'RIM-01')).toBe(true);
     expect(isModelDocument(projects[0].model)).toBe(true);
     expect(isModelDocument({ schema: 'wrong' })).toBe(false);
     expect(nextProjectCode(projects).startsWith('BRK-')).toBe(true);
@@ -211,5 +222,24 @@ describe('project library', () => {
     expect(geometry.bbox.max[0]).toBeCloseTo(1800, 0);
     expect(geometry.bbox.max[1]).toBeGreaterThan(80);
     expect(featureLog.some((entry) => entry.includes('NACA'))).toBe(true);
+  }, 60_000);
+
+  it('builds an 18-inch 9-spoke wheel rim from parameters', async () => {
+    const model = createWheelRimModel('RIM-09', '18 英寸 9 辐汽车轮辋', {
+      outerDiameterMm: 457,
+      widthMm: 203,
+      pcdMm: 114.3,
+      centerBoreMm: 72.6,
+      spokeCount: 9,
+      lugCount: 5,
+    });
+    expect(model.template).toBe('csg');
+    expect(model.solidFeatures?.filter((feature) => feature.id.startsWith('rim_spoke_')).length).toBe(9);
+    expect(model.solidFeatures?.filter((feature) => feature.id.startsWith('rim_lug_')).length).toBe(5);
+    const { geometry } = await buildGeometry(model);
+    expect(geometry.volumeMm3).toBeGreaterThan(0);
+    expect(geometry.bbox.max[0] - geometry.bbox.min[0]).toBeCloseTo(203, 0);
+    expect(geometry.bbox.max[2] - geometry.bbox.min[2]).toBeGreaterThan(470);
+    expect(geometry.bbox.max[1] - geometry.bbox.min[1]).toBeGreaterThan(470);
   }, 60_000);
 });

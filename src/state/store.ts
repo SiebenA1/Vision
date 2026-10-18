@@ -13,6 +13,7 @@ import type {
   SolidShape,
   ToastMessage,
   ValidationResult,
+  WheelRimSpec,
   WorkspaceId,
 } from '../core/types';
 import type { SolveProgress } from '../core/fea/client';
@@ -24,7 +25,7 @@ import {
   nextProjectCode,
   persistProjectLibrary,
 } from '../core/projects';
-import { createBlankModel, createStarterModel, createBrakePedalModel, createWindBladeModel, csgFeatures } from '../core/templates';
+import { createBlankModel, createStarterModel, createBrakePedalModel, createWindBladeModel, createWheelRimModel, csgFeatures } from '../core/templates';
 import { getMaterial, massFromVolume, type MaterialSpec } from '../core/materials';
 import { buildGeometry } from '../core/geometry/kernel';
 import type { OptimizerProgress } from '../core/optimization/optimizer';
@@ -95,6 +96,7 @@ interface AppState {
   createBlankProject: (name: string, code: string) => boolean;
   createBrakePedalProject: (preserveChat?: boolean) => void;
   createWindBladeProject: (preserveChat?: boolean) => void;
+  createWheelRimProject: (spec?: Partial<WheelRimSpec>, preserveChat?: boolean) => void;
   initializeStarter: (template: 'plate' | 'block' | 'cylinder') => void;
   addSolidFeature: (
     shape: SolidShape,
@@ -185,16 +187,19 @@ function chatSeedFor(model: ModelDocument): ChatMessage[] {
   const starter = template === 'plate' || template === 'block' || template === 'cylinder';
   const csg = template === 'csg';
   const blade = template === 'blade';
+  const wheel = csg && /轮辋|轮毂|rim/i.test(model.name);
   const solidCount = model.solidFeatures?.length ?? 0;
   const content = blank
     ? `${model.code} · ${model.name} 空白工程已创建。当前没有几何体。\n\n请在左侧选择 **基础板 / 基础块 / 圆柱体**，设置材料、边界条件与载荷，然后运行第一次静力校核。`
-    : csg
-      ? `${model.code} · ${model.name} 已载入。CSG 特征图包含 **${solidCount} 个实体/切除特征**，材料 ${getMaterial(model.materialId).shortName}，固定 ${model.supports[0]?.face ?? '—'}，载荷 ${model.loads[0]?.face ?? '—'} · ${model.loads[0]?.magnitude ?? 0} N。\n\n可运行基线校核、追问危险区域，或继续叠加特征。`
-      : blade
-        ? `${model.code} · ${model.name} 已载入。**NACA 翼型 8 截面放样**，弦长与扭角沿展向变化，叶根固定、叶尖 ${model.loads[0]?.magnitude ?? 0} N 等效载荷。\n\n下一步：运行基线校核，或调整叶片长度、弦长、扭角和厚度比。`
-        : starter
-          ? `${model.code} · ${model.name} 已载入。基础体 ${model.variables.map((variable) => `${variable.label} ${variable.value} mm`).join(' · ')}；材料 ${getMaterial(model.materialId).shortName}，顶面载荷 ${model.loads[0]?.magnitude ?? 0} N。\n\n下一步：运行基线校核，或继续在参数面板中调整几何。`
-          : `${model.code} · ${model.name} 已载入。${model.variables.length} 个参数化变量、${getMaterial(model.materialId).shortName} 材料与 ${model.loads[0]?.magnitude ?? 0} N 端载边界条件已同步。\n\n我建议先做一次基线校核，再以质量最小为目标搜索悬臂厚度。你也可以直接用自然语言改变几何、载荷或材料。`;
+    : wheel
+      ? `${model.code} · ${model.name} 已按参数实时生成。轮辋包含 **${solidCount} 个 CSG 特征**，辐条数量、外径、宽度、PCD、中心孔与螺栓孔均来自本次规格。\n\n可运行基线校核，或在 FEATURE BUILDER 中继续修改。`
+      : csg
+        ? `${model.code} · ${model.name} 已载入。CSG 特征图包含 **${solidCount} 个实体/切除特征**，材料 ${getMaterial(model.materialId).shortName}，固定 ${model.supports[0]?.face ?? '—'}，载荷 ${model.loads[0]?.face ?? '—'} · ${model.loads[0]?.magnitude ?? 0} N。\n\n可运行基线校核、追问危险区域，或继续叠加特征。`
+        : blade
+          ? `${model.code} · ${model.name} 已载入。**NACA 翼型 8 截面放样**，弦长与扭角沿展向变化，叶根固定、叶尖 ${model.loads[0]?.magnitude ?? 0} N 等效载荷。\n\n下一步：运行基线校核，或调整叶片长度、弦长、扭角和厚度比。`
+          : starter
+            ? `${model.code} · ${model.name} 已载入。基础体 ${model.variables.map((variable) => `${variable.label} ${variable.value} mm`).join(' · ')}；材料 ${getMaterial(model.materialId).shortName}，顶面载荷 ${model.loads[0]?.magnitude ?? 0} N。\n\n下一步：运行基线校核，或继续在参数面板中调整几何。`
+            : `${model.code} · ${model.name} 已载入。${model.variables.length} 个参数化变量、${getMaterial(model.materialId).shortName} 材料与 ${model.loads[0]?.magnitude ?? 0} N 端载边界条件已同步。\n\n我建议先做一次基线校核，再以质量最小为目标搜索悬臂厚度。你也可以直接用自然语言改变几何、载荷或材料。`;
   return [
     {
       id: `msg_seed_${Date.now().toString(36)}`,
@@ -203,7 +208,7 @@ function chatSeedFor(model: ModelDocument): ChatMessage[] {
       createdAt: Date.now() - 42_000,
       meta: {
         kind: 'insight',
-        chips: blank ? [] : blade ? ['基线校核', '哪里最危险？', '分析叶根'] : csg ? ['应力集中在哪？', '检查结构风险', '继续加特征'] : ['基线校核', '轻量化优化', '哪里最危险？'],
+        chips: blank ? [] : wheel ? ['基线校核', '哪里最危险？', '检查辐条根部'] : blade ? ['基线校核', '哪里最危险？', '分析叶根'] : csg ? ['应力集中在哪？', '检查结构风险', '继续加特征'] : ['基线校核', '轻量化优化', '哪里最危险？'],
       },
     },
   ];
@@ -469,6 +474,21 @@ export const useAppStore = create<AppState>()((set, get) => ({
     while (codes.has(`WT-${String(index).padStart(2, '0')}`)) index += 1;
     const code = `WT-${String(index).padStart(2, '0')}`;
     const model = createWindBladeModel(code, '风电叶片');
+    const record = makeProjectRecord(model);
+    set({ projects: [...state.projects, record] });
+    get().switchProject(record.id, preserveChat);
+  },
+
+  createWheelRimProject: (spec, preserveChat = false) => {
+    const state = get();
+    let index = 1;
+    const codes = new Set(state.projects.map((project) => project.model.code));
+    while (codes.has(`RIM-${String(index).padStart(2, '0')}`)) index += 1;
+    const code = `RIM-${String(index).padStart(2, '0')}`;
+    const spokeCount = Math.min(20, Math.max(3, Math.round(spec?.spokeCount ?? 5)));
+    const inches = Math.round(((spec?.outerDiameterMm ?? 457) / 25.4) * 10) / 10;
+    const name = `${inches} 英寸 ${spokeCount} 辐汽车轮辋`;
+    const model = createWheelRimModel(code, name, spec);
     const record = makeProjectRecord(model);
     set({ projects: [...state.projects, record] });
     get().switchProject(record.id, preserveChat);

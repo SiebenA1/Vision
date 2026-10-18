@@ -20,6 +20,16 @@ export interface SolidFeature {
   axis: Axis;
 }
 
+export interface WheelRimSpec {
+  outerDiameterMm: number;
+  widthMm: number;
+  pcdMm: number;
+  centerBoreMm: number;
+  spokeCount: number;
+  lugCount: number;
+  materialId?: string;
+}
+
 export type VariableGroup = '主控尺寸' | '连接结构' | '轻量化';
 export type VariableRole = 'primary' | 'secondary';
 
@@ -288,6 +298,7 @@ export interface AgentAction {
     | 'explain_risk'
     | 'export_report'
     | 'generate_preset'
+    | 'create_wheel_rim'
     | 'add_solid_feature'
     | 'unknown';
   args: Record<string, string | number | boolean>;

@@ -1,6 +1,6 @@
 import type { ModelDocument, ProjectRecord } from './types';
 import { BRACKET_MODEL, cloneModel } from './presets';
-import { createBrakePedalModel, createWindBladeModel } from './templates';
+import { createBrakePedalModel, createWindBladeModel, createWheelRimModel } from './templates';
 
 const STORAGE_KEY = 'vision.project.library.v1';
 const ACTIVE_KEY = 'vision.project.active.v1';
@@ -112,6 +112,15 @@ function windBladeProject(): ProjectRecord {
   };
 }
 
+function wheelRimProject(): ProjectRecord {
+  return {
+    id: 'prj_wheel_rim_01',
+    model: createWheelRimModel('RIM-01', '汽车轮辋'),
+    createdAt: '2026-10-17T09:40:00.000Z',
+    updatedAt: '2026-10-18T05:40:00.000Z',
+  };
+}
+
 export function seedProjects(): ProjectRecord[] {
   return [
     {
@@ -124,6 +133,7 @@ export function seedProjects(): ProjectRecord[] {
     lightweightProject(),
     brakePedalProject(),
     windBladeProject(),
+    wheelRimProject(),
   ];
 }
 
@@ -148,6 +158,9 @@ export function loadProjectLibrary(): ProjectLibraryState {
     }
     if (!projects.some((project) => project.model.code === 'WT-01')) {
       projects.push(windBladeProject());
+    }
+    if (!projects.some((project) => project.model.code === 'RIM-01')) {
+      projects.push(wheelRimProject());
     }
     const storedActive = localStorage.getItem(ACTIVE_KEY);
     const activeProjectId = projects.some((project) => project.id === storedActive)

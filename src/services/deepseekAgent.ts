@@ -152,6 +152,21 @@ function toolAction(call: DeepSeekToolCall): AgentAction {
       label: '',
     };
   }
+  if (name === 'create_wheel_rim') {
+    return {
+      tool: 'create_wheel_rim',
+      args: {
+        spokeCount: asNumber(args.spokeCount, 'spokeCount'),
+        outerDiameterMm: asNumber(args.outerDiameterMm, 'outerDiameterMm'),
+        widthMm: asNumber(args.widthMm, 'widthMm'),
+        pcdMm: asNumber(args.pcdMm, 'pcdMm'),
+        centerBoreMm: asNumber(args.centerBoreMm, 'centerBoreMm'),
+        lugCount: asNumber(args.lugCount, 'lugCount'),
+        materialId: String(args.materialId ?? 'AL6061-T6'),
+      },
+      label: '',
+    };
+  }
   if (name === 'add_solid_feature') {
     const shape = String(args.shape ?? '');
     if (!['box', 'cylinder', 'sphere'].includes(shape)) throw new Error(`无效实体类型：${shape}`);

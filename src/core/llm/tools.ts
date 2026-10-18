@@ -211,7 +211,7 @@ export function buildDeepSeekTools(model: ModelDocument): DeepSeekTool[] {
       function: {
         name: 'generate_preset',
         description:
-          '生成一个完整的多特征工程模型并作为新项目打开。brake-pedal 生成刹车踏板支架；wind-blade 生成由 NACA 翼型截面放样、带弦长/扭转/厚度分布的风电叶片。需要复杂拓扑而非只改现有参数时使用。',
+          '生成一个完整的工程预设模型并作为新项目打开。brake-pedal 生成刹车踏板支架；wind-blade 生成 NACA 截面放样风电叶片。轮辋必须使用 create_wheel_rim 按用户参数实时生成，不要用固定预设。',
         parameters: {
           type: 'object',
           properties: {
@@ -226,6 +226,62 @@ export function buildDeepSeekTools(model: ModelDocument): DeepSeekTool[] {
             },
           },
           required: ['preset'],
+          additionalProperties: false,
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'create_wheel_rim',
+        description:
+          '按用户明确参数实时生成汽车轮辋，不得用固定 5 辐预设代替。辐条数量、外径、宽度、PCD、中心孔、螺栓孔数量都进入参数化 CSG 生成器；生成后重建 watertight 几何。',
+        parameters: {
+          type: 'object',
+          properties: {
+            spokeCount: {
+              type: 'integer',
+              minimum: 3,
+              maximum: 20,
+              description: 'Number of equally spaced spokes requested by the user.',
+            },
+            outerDiameterMm: {
+              type: 'number',
+              minimum: 300,
+              maximum: 700,
+              description: 'Bead-seat outer diameter in mm. 18 inch = 457.2 mm.',
+            },
+            widthMm: {
+              type: 'number',
+              minimum: 100,
+              maximum: 350,
+              description: 'Rim width in mm.',
+            },
+            pcdMm: {
+              type: 'number',
+              minimum: 80,
+              maximum: 220,
+              description: 'Bolt circle diameter in mm.',
+            },
+            centerBoreMm: {
+              type: 'number',
+              minimum: 35,
+              maximum: 130,
+              description: 'Center bore diameter in mm.',
+            },
+            lugCount: {
+              type: 'integer',
+              minimum: 3,
+              maximum: 8,
+              description: 'Number of lug holes.',
+            },
+            materialId: {
+              type: 'string',
+              enum: MATERIALS.map((material) => material.id),
+              description: 'Material database id.',
+            },
+          },
+          required: ['spokeCount', 'outerDiameterMm', 'widthMm', 'pcdMm', 'centerBoreMm', 'lugCount'],
           additionalProperties: false,
         },
       },
@@ -389,6 +445,7 @@ export function buildModelContext(
       'explain_risk',
       'export_report',
       'generate_preset',
+      'create_wheel_rim',
       'add_solid_feature',
     ],
   };

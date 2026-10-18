@@ -43,6 +43,8 @@ export function labelForAction(action: AgentAction): string {
       return '生成工程校核报告';
     case 'generate_preset':
       return '生成工程预设模型';
+    case 'create_wheel_rim':
+      return `生成 ${action.args.spokeCount ?? 5} 辐轮辋`;
     case 'add_solid_feature':
       return `添加 ${action.args.shape ?? '实体'} 特征`;
     default:
@@ -122,6 +124,30 @@ export function riskNarrative(): string {
   const margin = ((material.yieldStrength - result.maxVonMises) / material.yieldStrength) * 100;
   const sfPass = result.safetyFactor >= 2.0;
   const drivers: string[] = [];
+  if (model.template === 'csg' && /轮辋|轮毂|rim/i.test(model.name)) {
+    const radius = Math.hypot(y, z);
+    const outerRadius = Math.max(
+      Math.abs(geometry.bbox.min[1]),
+      Math.abs(geometry.bbox.max[1]),
+      Math.abs(geometry.bbox.min[2]),
+      Math.abs(geometry.bbox.max[2]),
+    );
+    let region = '辐条中段 / 轮毂连接区';
+    if (radius < 95) region = '轮毂法兰 / 中心孔与螺栓孔区';
+    else if (radius > outerRadius - 35) region = '轮唇 / 胎圈座过渡区';
+    else if (radius < 125) region = '辐条根部与轮毂过渡区';
+    if (result.maxDisplacement > 2) drivers.push('辐条弯曲刚度');
+    if (radius < 125) drivers.push('辐条根部弯曲/剪切');
+    if (radius > outerRadius - 35) drivers.push('轮唇局部弯曲');
+    if (result.safetyFactor < 1.8) drivers.push('轮毂法兰与螺栓孔承压');
+    if (drivers.length === 0) drivers.push('辐条根部与轮唇的应力梯度');
+    return [
+      `热点位于 **${region}**，坐标 (${fmt(x, 1)}, ${fmt(y, 1)}, ${fmt(z, 1)}) mm。`,
+      `峰值 von Mises **${fmt(result.maxVonMises, 1)} MPa**，对应安全系数 **${fmt(result.safetyFactor, 2)}**；距屈服点仍有 ${fmt(margin, 1)}% 的材料裕度。`,
+      `当前控制因素：${drivers.join('、')}。轮辋承受的是旋转弯曲/径向载荷，当前 x-min 固定与 z-min 载荷只是通用占位工况；真实分析需定义轮毂螺栓预紧、胎圈接触和旋转载荷谱。`,
+      result.warnings.length ? `自动检查提示：${result.warnings[0]}` : '自动检查未发现平衡或收敛异常。',
+    ].join('\n\n');
+  }
   if (model.template === 'csg') {
     let region = '叉板 / 加强筋传力路径';
     if (x <= 18) region = '安装背板与螺栓孔区';
@@ -208,7 +234,14 @@ function actionResultSummary(action: AgentAction): string {
     if (model.template === 'blade') {
       return `已生成 **${model.code} · ${model.name}**。NACA 翼型 8 截面放样、弦长/扭转/厚度分布已重建为 watertight 几何。\n\n下一步可以运行基线校核，或调整叶片长度、弦长、扭角和厚度比。`;
     }
+    if (/轮辋|轮毂|rim/i.test(model.name)) {
+      return `已生成 **${model.code} · ${model.name}**。18 英寸 5 辐轮辋：筒身、轮唇、轮毂、中心孔、5 根辐条与 5 个 PCD 114.3 螺栓孔已重建为 watertight 几何。\n\n下一步可以运行基线校核，或在 FEATURE BUILDER 中调整辐条、轮唇和螺栓孔。`;
+    }
     return `已生成 **${model.code} · ${model.name}**。CSG 特征图包含 **${model.solidFeatures?.length ?? 0} 个特征**（安装背板、叉板、加强筋、枢轴座、踏板臂及减重/安装孔），watertight 几何已重建。\n\n下一步可以运行基线校核，或继续添加/切除实体特征。`;
+  }
+  if (action.tool === 'create_wheel_rim') {
+    const model = useAppStore.getState().model;
+    return `已按参数生成 **${model.code} · ${model.name}**。轮辋包含 **${model.solidFeatures?.filter((feature) => feature.id.startsWith('rim_spoke_')).length ?? 0} 根均匀辐条**、**${model.solidFeatures?.filter((feature) => feature.id.startsWith('rim_lug_')).length ?? 0} 个螺栓孔**，中心孔、轮唇与轮毂均为当前参数重建，watertight 几何已更新。`;
   }
   if (action.tool === 'add_solid_feature') {
     const model = useAppStore.getState().model;
@@ -225,13 +258,32 @@ export async function executeTool(action: AgentAction, lastResultRef: LastResult
     const preset = String(action.args.preset ?? '');
     if (preset === 'wind-blade') {
       store.createWindBladeProject(true);
-    } else {
+    } else if (preset === 'brake-pedal') {
       store.createBrakePedalProject(true);
+    } else {
+      throw new Error(`未知预设：${preset}`);
     }
     await wait(60);
     const geometry = await useAppStore.getState().rebuildGeometry();
     if (!geometry) throw new Error(useAppStore.getState().geometryError ?? '几何重建失败');
     detail = `${useAppStore.getState().model.variables.length} variables · watertight`;
+    summary = actionResultSummary(action);
+    lastResultRef.value = null;
+  } else if (action.tool === 'create_wheel_rim') {
+    const spec = {
+      outerDiameterMm: Number(action.args.outerDiameterMm),
+      widthMm: Number(action.args.widthMm),
+      pcdMm: Number(action.args.pcdMm),
+      centerBoreMm: Number(action.args.centerBoreMm),
+      spokeCount: Number(action.args.spokeCount),
+      lugCount: Number(action.args.lugCount),
+      materialId: String(action.args.materialId ?? 'AL6061-T6'),
+    };
+    store.createWheelRimProject(spec, true);
+    await wait(60);
+    const geometry = await useAppStore.getState().rebuildGeometry();
+    if (!geometry) throw new Error(useAppStore.getState().geometryError ?? '轮辋几何重建失败');
+    detail = `${spec.spokeCount} spokes · ${spec.lugCount} lugs · watertight`;
     summary = actionResultSummary(action);
     lastResultRef.value = null;
   } else if (action.tool === 'add_solid_feature') {

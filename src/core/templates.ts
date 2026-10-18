@@ -4,6 +4,7 @@ import type {
   GeometryTemplate,
   ModelDocument,
   SolidFeature,
+  WheelRimSpec,
 } from './types';
 import { BRACKET_MODEL, cloneModel } from './presets';
 
@@ -456,5 +457,151 @@ export function createBrakePedalModel(code = 'PEDAL-01', name = '刹车踏板支
   model.meta.client = 'VISION Brake Systems';
   model.meta.designIntent =
     '刹车踏板支架：后安装板固定，双侧叉板承载枢轴，踏板臂将 500 N 脚部载荷传至枢轴座。重点校核安装孔、叉板焊缝区与枢轴座。';
+  return model;
+}
+
+/**
+ * Parameterized passenger-car wheel rim.
+ * Axis = X. All dimensions in mm; `outerDiameterMm` is the bead seat diameter.
+ */
+export const DEFAULT_WHEEL_RIM_SPEC: WheelRimSpec = {
+  outerDiameterMm: 457,
+  widthMm: 203,
+  pcdMm: 114.3,
+  centerBoreMm: 72.6,
+  spokeCount: 5,
+  lugCount: 5,
+  materialId: 'AL6061-T6',
+};
+
+export function createWheelRimModel(
+  code = 'RIM-01',
+  name = '汽车轮辋',
+  options: Partial<WheelRimSpec> = {},
+): ModelDocument {
+  const spec: WheelRimSpec = { ...DEFAULT_WHEEL_RIM_SPEC, ...options };
+  const outerDiameter = Math.min(700, Math.max(300, spec.outerDiameterMm));
+  const width = Math.min(350, Math.max(100, spec.widthMm));
+  const pcd = Math.min(220, Math.max(80, spec.pcdMm));
+  const centerBore = Math.min(130, Math.max(35, spec.centerBoreMm));
+  const spokeCount = Math.min(20, Math.max(3, Math.round(spec.spokeCount)));
+  const lugCount = Math.min(8, Math.max(3, Math.round(spec.lugCount)));
+  const outerRadius = outerDiameter / 2;
+  const wall = Math.max(10, Math.min(18, outerRadius * 0.045));
+  const innerRadius = outerRadius - wall;
+  const lipRadius = outerRadius + 9;
+  const lipWidth = Math.max(10, Math.min(18, width * 0.08));
+  const lipX = width / 2 - lipWidth / 2;
+  const hubRadius = Math.max(70, centerBore / 2 + 28, pcd / 2 + 20);
+  const hubWidth = Math.min(width * 0.46, 96);
+  const hubX = width * 0.22;
+  const spokeX = width * 0.29;
+  const spokeThickness = Math.max(16, width * 0.13);
+  const spokeRadial = innerRadius - hubRadius + 16;
+  const spokeRadius = (innerRadius + hubRadius) / 2;
+  const spokeWidth = Math.min(36, ((2 * Math.PI * hubRadius) / spokeCount) * 0.56);
+  const lugRadius = Math.min(10, Math.max(6, pcd * 0.07));
+
+  const features: SolidFeature[] = [
+    solid('rim_barrel', '轮辋筒身', 'cylinder', 'add', [0, 0, 0], { radius: outerRadius, height: width, axis: 'x' }),
+    solid('rim_bore', '轮辋内腔', 'cylinder', 'subtract', [0, 0, 0], {
+      radius: innerRadius,
+      height: width + 20,
+      axis: 'x',
+    }),
+    solid('rim_lip_front', '前轮唇', 'cylinder', 'add', [lipX, 0, 0], {
+      radius: lipRadius,
+      height: lipWidth,
+      axis: 'x',
+    }),
+    solid('rim_lip_front_cut', '前轮唇内径', 'cylinder', 'subtract', [lipX, 0, 0], {
+      radius: innerRadius - 3,
+      height: lipWidth + 8,
+      axis: 'x',
+    }),
+    solid('rim_lip_rear', '后轮唇', 'cylinder', 'add', [-lipX, 0, 0], {
+      radius: lipRadius,
+      height: lipWidth,
+      axis: 'x',
+    }),
+    solid('rim_lip_rear_cut', '后轮唇内径', 'cylinder', 'subtract', [-lipX, 0, 0], {
+      radius: innerRadius - 3,
+      height: lipWidth + 8,
+      axis: 'x',
+    }),
+    solid('rim_hub', '轮毂', 'cylinder', 'add', [hubX, 0, 0], { radius: hubRadius, height: hubWidth, axis: 'x' }),
+    solid('rim_center_bore', '中心孔', 'cylinder', 'subtract', [hubX, 0, 0], {
+      radius: centerBore / 2,
+      height: hubWidth + 20,
+      axis: 'x',
+    }),
+    solid('rim_hub_flange', '轮毂法兰', 'cylinder', 'add', [hubX + hubWidth / 2 + 4, 0, 0], {
+      radius: hubRadius + 14,
+      height: 10,
+      axis: 'x',
+    }),
+  ];
+  for (let index = 0; index < spokeCount; index += 1) {
+    const angle = (index * 2 * Math.PI) / spokeCount;
+    features.push(
+      solid(`rim_spoke_${index + 1}`, `辐条 ${String(index + 1).padStart(2, '0')}`, 'box', 'add', [
+        spokeX,
+        Math.cos(angle) * spokeRadius,
+        Math.sin(angle) * spokeRadius,
+      ], {
+        size: [spokeThickness, spokeRadial, spokeWidth],
+        rotation: [(index * 360) / spokeCount, 0, 0],
+      }),
+    );
+  }
+  for (let index = 0; index < lugCount; index += 1) {
+    const angle = (index * 2 * Math.PI) / lugCount + Math.PI / lugCount;
+    features.push(
+      solid(`rim_lug_${index + 1}`, `螺栓孔 ${String(index + 1).padStart(2, '0')}`, 'cylinder', 'subtract', [
+        hubX,
+        Math.cos(angle) * (pcd / 2),
+        Math.sin(angle) * (pcd / 2),
+      ], {
+        radius: lugRadius,
+        height: hubWidth + 30,
+        axis: 'x',
+      }),
+    );
+  }
+  const model = cloneModel(BRACKET_MODEL);
+  model.id = `mdl_${Date.now().toString(36)}`;
+  model.code = code;
+  model.name = name;
+  model.subtitle = `${spokeCount}-spoke wheel rim / parameterized CSG`;
+  model.revision = 'R01';
+  model.template = 'csg';
+  model.materialId = spec.materialId ?? 'AL6061-T6';
+  model.variables = [];
+  model.features = csgFeatures(features);
+  model.solidFeatures = features;
+  model.supports = [
+    {
+      id: 'sup_rim_rear',
+      name: '轮辋背面固定',
+      face: 'x-min',
+      type: 'fixed',
+      enabled: true,
+    },
+  ];
+  model.loads = [
+    {
+      id: 'load_rim',
+      name: '轮辋底部径向载荷',
+      face: 'z-min',
+      vector: [0, 0, 1],
+      magnitude: 3000,
+      enabled: true,
+      description: '轮辋底部等效径向载荷 · 3,000 N',
+    },
+  ];
+  model.mesh = { ...model.mesh, cellSizeMm: outerDiameter > 500 ? 10 : 8 };
+  model.meta.created = new Date().toISOString().slice(0, 10);
+  model.meta.client = 'VISION Automotive';
+  model.meta.designIntent = `${spokeCount} 辐乘用车轮辋：外径 ${outerDiameter} mm、宽 ${width} mm、PCD ${pcd} mm、中心孔 ${centerBore} mm、${lugCount} 个螺栓孔。重点校核辐条根部、轮唇和轮毂法兰；当前为各向同性实体，未模拟旋压/锻造各向异性与疲劳。`;
   return model;
 }

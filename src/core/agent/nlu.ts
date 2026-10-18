@@ -200,8 +200,50 @@ function windBladePlan(): AgentPlan {
   );
 }
 
+function wheelRimPlan(text: string): AgentPlan {
+  const int = (value: string | undefined, fallback: number) => {
+    const parsed = Number.parseInt(value ?? '', 10);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  };
+  const number = (value: string | undefined, fallback: number) => {
+    const parsed = Number.parseFloat(value ?? '');
+    return Number.isFinite(parsed) ? parsed : fallback;
+  };
+  const inch = text.match(/(\d+(?:\.\d+)?)\s*(?:英寸|寸|inch)/);
+  const outerMm = text.match(/(?:外径|直径)\s*[:：]?\s*(\d+(?:\.\d+)?)\s*mm/);
+  const width = text.match(/(?:宽度|总宽|轮辋宽)\s*[:：]?\s*(\d+(?:\.\d+)?)\s*mm/);
+  const pcd = text.match(/pcd\s*[:：]?\s*(\d+(?:\.\d+)?)/);
+  const bore = text.match(/(?:中心孔|中心孔径)\s*[:：]?\s*(\d+(?:\.\d+)?)\s*mm/);
+  const spoke = text.match(/(\d+)\s*(?:辐|根\s*辐条|spokes?)/);
+  const lugs = text.match(/(\d+)\s*个?\s*(?:螺栓孔|螺孔|lugs?)/);
+  const spec = {
+    outerDiameterMm: outerMm ? number(outerMm[1], 457) : inch ? number(inch[1], 18) * 25.4 : 457,
+    widthMm: width ? number(width[1], 203) : 203,
+    pcdMm: pcd ? number(pcd[1], 114.3) : 114.3,
+    centerBoreMm: bore ? number(bore[1], 72.6) : 72.6,
+    spokeCount: spoke ? int(spoke[1], 5) : 5,
+    lugCount: lugs ? int(lugs[1], 5) : 5,
+    materialId: findMaterial(text) ?? 'AL6061-T6',
+  };
+  return {
+    intent: 'modeling',
+    summary: `将实时生成 ${spec.spokeCount} 辐轮辋：外径 ${Math.round(spec.outerDiameterMm)} mm、宽 ${spec.widthMm} mm、PCD ${spec.pcdMm} mm、中心孔 ${spec.centerBoreMm} mm、${spec.lugCount} 个螺栓孔；几何由参数化 CSG 生成器重建，不使用固定轮辋预设。`,
+    actions: [
+      {
+        tool: 'create_wheel_rim',
+        args: { ...spec },
+        label: `生成 ${spec.spokeCount} 辐轮辋`,
+      },
+    ],
+    confidence: 0.97,
+  };
+}
+
 export function parseEngineeringPrompt(prompt: string, model: ModelDocument): AgentPlan {
   const text = normalize(prompt);
+  if (/(轮辋|轮毂|wheel\s*rim|rim|wheel)/.test(text) && !/(方向盘|steering\s*wheel)/.test(text)) {
+    return wheelRimPlan(text);
+  }
   if (/(风电|风机|风力|wind).*(叶片|扇叶|blade)|(叶片|扇叶).*(风电|风机)|(风电|风机).*(blade)/.test(text)) {
     return windBladePlan();
   }

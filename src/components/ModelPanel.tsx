@@ -505,7 +505,7 @@ export function ModelPanel() {
                   : (model.template ?? 'bracket') === 'blade'
                     ? '风电叶片'
                     : (model.template ?? 'bracket') === 'csg'
-                      ? 'CSG 特征模型'
+                      ? model.name
                       : '参数化支架'}
           </h2>
         </div>
