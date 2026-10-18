@@ -42,6 +42,13 @@ export default defineConfig(({ mode }) => {
   );
 
   const proxy = {
+    '/api/engineering': {
+      target: process.env.VISION_ENGINEERING_URL || 'http://127.0.0.1:8101',
+      changeOrigin: false,
+      timeout: 300_000,
+      proxyTimeout: 300_000,
+      rewrite: (path: string) => path.replace(/^\/api\/engineering/, ''),
+    },
     '/api/deepseek': {
       target,
       changeOrigin: true,

@@ -10,7 +10,8 @@
     "preview": "vite preview --host 127.0.0.1",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "backend": "python server/engineering_server.py"
   },
   "engines": {
     "node": ">=20.19"
