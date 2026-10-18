@@ -22,6 +22,7 @@ import {
   nextProjectCode,
   persistProjectLibrary,
 } from '../core/projects';
+import { createBlankModel, createStarterModel } from '../core/templates';
 import { getMaterial, massFromVolume, type MaterialSpec } from '../core/materials';
 import { buildGeometry } from '../core/geometry/kernel';
 import type { OptimizerProgress } from '../core/optimization/optimizer';
@@ -88,7 +89,9 @@ interface AppState {
 
   syncProject: () => void;
   switchProject: (id: string) => void;
-  createProject: (name: string, code: string) => void;
+  createProject: (name: string, code: string) => boolean;
+  createBlankProject: (name: string, code: string) => boolean;
+  initializeStarter: (template: 'plate' | 'block' | 'cylinder') => void;
   duplicateProject: (id: string) => void;
   deleteProject: (id: string) => void;
   renameProject: (id: string, name: string, code: string) => void;
@@ -166,15 +169,23 @@ const initialProject =
 const initialModel = cloneModel(initialProject.model);
 
 function chatSeedFor(model: ModelDocument): ChatMessage[] {
+  const template = model.template ?? 'bracket';
+  const blank = template === 'empty';
+  const starter = template === 'plate' || template === 'block' || template === 'cylinder';
+  const content = blank
+    ? `${model.code} · ${model.name} 空白工程已创建。当前没有几何体。\n\n请在左侧选择 **基础板 / 基础块 / 圆柱体**，设置材料、边界条件与载荷，然后运行第一次静力校核。`
+    : starter
+      ? `${model.code} · ${model.name} 已载入。基础体 ${model.variables.map((variable) => `${variable.label} ${variable.value} mm`).join(' · ')}；材料 ${getMaterial(model.materialId).shortName}，顶面载荷 ${model.loads[0]?.magnitude ?? 0} N。\n\n下一步：运行基线校核，或继续在参数面板中调整几何。`
+      : `${model.code} · ${model.name} 已载入。${model.variables.length} 个参数化变量、${getMaterial(model.materialId).shortName} 材料与 ${model.loads[0]?.magnitude ?? 0} N 端载边界条件已同步。\n\n我建议先做一次基线校核，再以质量最小为目标搜索悬臂厚度。你也可以直接用自然语言改变几何、载荷或材料。`;
   return [
     {
-      id: 'msg_seed_1',
+      id: `msg_seed_${Date.now().toString(36)}`,
       role: 'assistant',
-      content: `${model.code} · ${model.name} 已载入。${model.variables.length} 个参数化变量、${getMaterial(model.materialId).shortName} 材料与 ${model.loads[0]?.magnitude ?? 0} N 端载边界条件已同步。\n\n我建议先做一次基线校核，再以质量最小为目标搜索悬臂厚度。你也可以直接用自然语言改变几何、载荷或材料。`,
+      content,
       createdAt: Date.now() - 42_000,
       meta: {
         kind: 'insight',
-        chips: ['基线校核', '轻量化优化', '哪里最危险？'],
+        chips: blank ? [] : ['基线校核', '轻量化优化', '哪里最危险？'],
       },
     },
   ];
@@ -273,6 +284,18 @@ export const useAppStore = create<AppState>()((set, get) => ({
   rebuildGeometry: async () => {
     const model = get().model;
     const seq = get().buildSeq + 1;
+    if ((model.template ?? 'bracket') === 'empty') {
+      set({
+        buildSeq: seq,
+        geometry: null,
+        geometryMetrics: null,
+        geometryError: null,
+        featureLog: [],
+        building: false,
+        resultStale: false,
+      });
+      return null;
+    }
     set({ buildSeq: seq, building: true, geometryError: null });
     try {
       const { geometry, featureLog } = await buildGeometry(model);
@@ -325,8 +348,11 @@ export const useAppStore = create<AppState>()((set, get) => ({
       model,
       projects: withCurrent,
       activeProjectId: target.id,
-      selectedFeatureId: model.features.find((feature) => feature.id === 'arm')?.id ?? model.features[0]?.id ?? 'arm',
-      selectedVariableKey: 'armThickness',
+      selectedFeatureId: model.features.find((feature) => feature.id === 'arm')?.id ?? model.features[0]?.id ?? 'base',
+      selectedVariableKey:
+        model.variables.find((variable) => variable.key === 'armThickness')?.key ??
+        model.variables[0]?.key ??
+        '',
       chat: chatSeedFor(model),
     });
     persistProjectLibrary(withCurrent, target.id);
@@ -341,7 +367,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
     const cleanCode = (code.trim() || nextProjectCode(state.projects)).toUpperCase();
     if (state.projects.some((project) => project.model.code === cleanCode)) {
       get().addToast({ title: '项目编号已存在', detail: cleanCode, tone: 'warning' });
-      return;
+      return false;
     }
     const model = cloneModel(state.model);
     model.id = `mdl_${Date.now().toString(36)}`;
@@ -353,6 +379,53 @@ export const useAppStore = create<AppState>()((set, get) => ({
     const record = makeProjectRecord(model);
     set({ projects: [...state.projects, record] });
     get().switchProject(record.id);
+    return true;
+  },
+
+  createBlankProject: (name, code) => {
+    const state = get();
+    const cleanName = name.trim() || '空白工程';
+    const cleanCode = (code.trim() || nextProjectCode(state.projects)).toUpperCase();
+    if (state.projects.some((project) => project.model.code === cleanCode)) {
+      get().addToast({ title: '项目编号已存在', detail: cleanCode, tone: 'warning' });
+      return false;
+    }
+    const model = createBlankModel(cleanName, cleanCode);
+    const record = makeProjectRecord(model);
+    set({ projects: [...state.projects, record] });
+    get().switchProject(record.id);
+    return true;
+  },
+
+  initializeStarter: (template) => {
+    const state = get();
+    const model = createStarterModel(template, state.model);
+    const projects = state.projects.map((project) =>
+      project.id === state.activeProjectId
+        ? { ...project, model: cloneModel(model), updatedAt: new Date().toISOString() }
+        : project,
+    );
+    const starterLabel = template === 'plate' ? '基础板' : template === 'block' ? '基础块' : '圆柱体';
+    const systemMessage: ChatMessage = {
+      id: uid('msg'),
+      role: 'assistant',
+      content: `已添加 **${starterLabel}**。${model.variables.map((variable) => `${variable.label} ${variable.value} mm`).join(' · ')}。\n\n可运行基线校核，或继续修改参数。`,
+      createdAt: Date.now(),
+      meta: { kind: 'insight', source: 'system' },
+    };
+    set({
+      ...freshAnalysisState(),
+      model,
+      projects,
+      activeProjectId: state.activeProjectId,
+      selectedFeatureId: 'base',
+      selectedVariableKey: model.variables[0]?.key ?? 'length',
+      chat: [...state.chat, systemMessage],
+    });
+    persistProjectLibrary(projects, state.activeProjectId);
+    window.setTimeout(() => {
+      void get().rebuildGeometry();
+    }, 0);
   },
 
   duplicateProject: (id) => {
@@ -397,8 +470,11 @@ export const useAppStore = create<AppState>()((set, get) => ({
       model,
       projects: remaining,
       activeProjectId: fallback.id,
-      selectedFeatureId: model.features.find((feature) => feature.id === 'arm')?.id ?? model.features[0]?.id ?? 'arm',
-      selectedVariableKey: 'armThickness',
+      selectedFeatureId: model.features.find((feature) => feature.id === 'arm')?.id ?? model.features[0]?.id ?? 'base',
+      selectedVariableKey:
+        model.variables.find((variable) => variable.key === 'armThickness')?.key ??
+        model.variables[0]?.key ??
+        '',
       chat: chatSeedFor(model),
     });
     persistProjectLibrary(remaining, fallback.id);

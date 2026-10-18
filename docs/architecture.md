@@ -85,6 +85,22 @@ The UI exposes switching, creation from the current model, duplication, delete, 
 
 Derived artifacts are never persisted with the project. On reload, the model is restored but geometry and results are rebuilt on demand.
 
+### 3.2 Blank projects and starter solids
+
+A project can be created in `template: 'empty'` mode. In this state it has no features and no variables. `rebuildGeometry()` short-circuits to a clean empty state instead of treating it as an error, and `SceneViewport` clears the previous project’s mesh, annotations, ground and grid.
+
+The model panel and the empty viewport offer three parameterized starters:
+
+| Template | Variables | Default topology |
+|---|---|---|
+| `plate` | length, width, thickness | solid rectangular plate |
+| `block` | length, width, height | solid block |
+| `cylinder` | diameter, height | 64-segment cylinder |
+
+`createStarterModel()` populates variables, a single feature descriptor, a bottom fixed support and a top downward load. `src/core/geometry/kernel.ts` has a dedicated primitive builder; `empty` and `bracket` remain separate paths. This is intentionally not a freeform sketcher: the blank project is a zero-geometry starting point with a controlled parametric base.
+
+The blank state does not auto-inherit the previous project's geometry or results; browser tests assert the old mesh is cleared.
+
 ## 4. Geometry build
 
 `src/core/geometry/kernel.ts`

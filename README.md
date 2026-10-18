@@ -18,6 +18,7 @@ VISION 是一个运行在浏览器里的 AI 原生工程工作台原型。它把
 - **完整大模型能力**：`deepseek-flash` / `deepseek-v4-pro`、thinking 模式与 reasoning effort、SSE 流式输出、多轮工具调用、reasoning_content 回放、token usage、失败回退。
 - **本地安全网关**：Vite 代理转发到 DeepSeek 固定域名，避免浏览器 CORS；支持浏览器会话 Key 或服务端 `DEEPSEEK_API_KEY` 注入。
 - **工程中心**：本地项目库，项目切换、派生、复制、重命名、删除、JSON 导入/导出与自动保存；项目 crumb 和下拉箭头打开同一工程中心。
+- **空白工程**：从零创建无几何项目，再从 **基础板 / 基础块 / 圆柱体** 三个参数化起点开始；空白状态不会保留上一项目的 3D 几何或结果。
 - **可收合工作区**：模型面板可收起，顶部固定的 `PanelLeft` 按钮或 `[` 快捷键可重新展开；收起状态有橙色高亮提示。
 - **参数化建模**：7 个特征、14 个设计变量，基于 Manifold 的 watertight mesh-boolean 内核实时重建。
 - **真实 CAE**：C3D8 六面体网格、线弹性静力、矩阵自由 PCG + Jacobi，全部在浏览器 Worker 中运行。
@@ -52,7 +53,7 @@ npm run preview
 验证：
 
 ```bash
-npm test          # 8/8：几何 / 求解器 / 解析器 / DeepSeek 工具契约 / 项目库
+npm test          # 10/10：几何 / 求解器 / 解析器 / DeepSeek 工具契约 / 项目库 / 空白起点 / 基础板 FEA
 npm run typecheck
 ```
 
@@ -64,6 +65,20 @@ node scripts/deepseek-mock-test.mjs  # 流式 reasoning + tool call + 工具结�
 ```
 
 > 首次打开会自动执行一次基线校核。当前机器上的浏览器 Worker 完成 5k 级单元求解约 8–12 秒；期间界面会显示网格与 PCG 进度。若只想浏览设计，可等待“校核完成”后操作。
+
+### 新建空白工程
+
+1. 点击顶栏项目名称 / 下拉箭头，或 `···` 菜单 → **工程中心**。
+2. 在右侧 **NEW PROJECT** 输入项目名称与可选编号。
+3. 点击 **空白工程**。
+4. 新项目没有几何；在左侧模型面板或视口中央选择 **基础板 / 基础块 / 圆柱体**。
+5. 设置材料、尺寸、约束和载荷后运行基线校核。
+
+> 当前 MVP 尚未提供自由草图器，因此“空白工程”是零几何项目，并用参数化基础体作为第一个建模起点；它不会自动带入上一项目的几何或结果。
+
+| 空白工程 | 加入基础板 |
+|---|---|
+| ![空白工程](docs/assets/blank-project.png) | ![基础板](docs/assets/blank-plate.png) |
 
 ### 启用 DeepSeek 大模型
 
@@ -195,6 +210,9 @@ traffic is optional DeepSeek chat through the local gateway.
 | `src/core/fea/solver.ts` | 边界条件、PCG、应力恢复、平衡校核、解析基准 |
 | `src/core/fea/worker.ts` | 网格 / 求解 / 验证 Worker |
 | `src/core/optimization/optimizer.ts` | 并行候选搜索、细化、最终复核 |
+| `src/core/templates.ts` | 空白工程与基础板 / 基础块 / 圆柱体起点 |
+| `src/core/projects.ts` | 项目记录、校验和本地持久化 |
+| `src/components/ProjectCenterModal.tsx` | 工程中心 / 项目切换与导入导出 |
 | `src/core/agent/nlu.ts` | 中英文工程意图解析（本地回退） |
 | `src/core/llm/client.ts` | DeepSeek Chat Completions + SSE 流解析 |
 | `src/core/llm/tools.ts` | 工具 JSON Schema + 模型上下文 |
@@ -314,7 +332,8 @@ dist/assets/manifold-*.wasm
 │  ├─ core/            # 几何、FEA、优化、材料、报告、Agent、项目库
 │  │  ├─ llm/          # DeepSeek client / tools / prompt / types
 │  │  ├─ agent/        # 本地意图解析
-│  │  └─ projects.ts   # 项目记录、本地持久化、JSON 校验
+│  │  ├─ projects.ts   # 项目记录、本地持久化、JSON 校验
+│  │  └─ templates.ts  # 空白工程 / 基础体起点
 │  ├─ components/      # 工作台壳、场景、面板、DeepSeek 设置、工程中心
 │  ├─ features/        # 按需加载的分析 / 优化工作台
 │  ├─ services/        # 双规划器、求解编排、工具执行

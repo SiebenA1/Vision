@@ -256,6 +256,7 @@ export const BRACKET_MODEL: ModelDocument = {
   name: '轻量悬挂支架',
   subtitle: 'Cantilever bracket / topology-aware study',
   revision: 'R04',
+  template: 'bracket',
   units: 'mm-N-MPa',
   materialId: 'AL6061-T6',
   variables: BRACKET_VARIABLES,

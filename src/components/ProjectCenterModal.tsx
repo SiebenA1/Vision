@@ -8,6 +8,7 @@ import {
   Copy,
   Download,
   FileJson,
+  FilePlus,
   FolderKanban,
   Plus,
   Save,
@@ -35,6 +36,7 @@ export function ProjectCenterModal({ onClose }: ProjectCenterModalProps) {
   const activeModel = useAppStore((state) => state.model);
   const switchProject = useAppStore((state) => state.switchProject);
   const createProject = useAppStore((state) => state.createProject);
+  const createBlankProject = useAppStore((state) => state.createBlankProject);
   const duplicateProject = useAppStore((state) => state.duplicateProject);
   const deleteProject = useAppStore((state) => state.deleteProject);
   const renameProject = useAppStore((state) => state.renameProject);
@@ -78,9 +80,17 @@ export function ProjectCenterModal({ onClose }: ProjectCenterModalProps) {
   };
 
   const handleCreate = () => {
-    createProject(newName, newCode);
-    resetDeepSeekConversation();
-    onClose();
+    if (createProject(newName, newCode)) {
+      resetDeepSeekConversation();
+      onClose();
+    }
+  };
+
+  const handleCreateBlank = () => {
+    if (createBlankProject(newName, newCode)) {
+      resetDeepSeekConversation();
+      onClose();
+    }
   };
 
   const handleDuplicate = (id: string) => {
@@ -162,7 +172,6 @@ export function ProjectCenterModal({ onClose }: ProjectCenterModalProps) {
                 const isActive = project.id === activeProjectId;
                 const isSelected = project.id === selected?.id;
                 const material = getMaterial(project.model.materialId);
-                const armThickness = project.model.variables.find((variable) => variable.key === 'armThickness')?.value;
                 return (
                   <button
                     key={project.id}
@@ -182,7 +191,11 @@ export function ProjectCenterModal({ onClose }: ProjectCenterModalProps) {
                     <b className="project-card__name">{project.model.name}</b>
                     <div className="project-card__meta">
                       <span>{material.shortName}</span>
-                      <span>{armThickness} mm</span>
+                      <span>
+                        {project.model.template === 'empty'
+                          ? '空白'
+                          : `${project.model.variables[0]?.value ?? '—'} mm`}
+                      </span>
                       <span>{project.model.loads[0]?.magnitude ?? 0} N</span>
                     </div>
                     <div className="project-card__foot">
@@ -293,15 +306,20 @@ export function ProjectCenterModal({ onClose }: ProjectCenterModalProps) {
                 <Plus size={15} />
                 <div>
                   <span className="eyebrow">NEW PROJECT</span>
-                  <b>从当前项目派生</b>
+                  <b>派生当前项目，或创建空白工程</b>
                 </div>
               </div>
-              <p>复制当前参数化特征、材料与边界条件，生成独立项目并立即打开。之后可在参数面板继续编辑。</p>
+              <p>
+                派生项目会复制当前特征、材料与边界条件；空白工程不含几何，打开后可在模型面板选择基础板 / 基础块 / 圆柱体。
+              </p>
               <div className="project-create__form">
                 <input className="input" value={newName} onChange={(event) => setNewName(event.target.value)} placeholder="项目名称" />
                 <input className="input" value={newCode} onChange={(event) => setNewCode(event.target.value)} placeholder="编号（可空）" />
                 <button type="button" className="button button--primary" onClick={handleCreate} disabled={!newName.trim()}>
-                  <Plus size={14} /> 创建
+                  <Plus size={14} /> 派生
+                </button>
+                <button type="button" className="button" onClick={handleCreateBlank} disabled={!newName.trim()}>
+                  <FilePlus size={14} /> 空白工程
                 </button>
               </div>
             </div>

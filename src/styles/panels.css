@@ -1317,6 +1317,33 @@
   color: var(--lime);
 }
 
+.stage-empty--blank {
+  min-width: 300px;
+}
+
+.stage-empty__starters {
+  display: flex;
+  gap: 5px;
+  margin-top: 6px;
+}
+
+.stage-empty__starters button {
+  height: 29px;
+  padding: 0 11px;
+  border: 1px solid rgba(203, 243, 107, 0.25);
+  border-radius: 3px;
+  background: rgba(203, 243, 107, 0.08);
+  color: #e9f4ce;
+  font-size: 9px;
+  font-weight: 600;
+}
+
+.stage-empty__starters button:hover {
+  background: var(--lime);
+  color: #1a1d17;
+  border-color: var(--lime);
+}
+
 .stage-empty b,
 .stage-error b {
   color: #f4f1e8;
@@ -1335,7 +1362,114 @@
   background: rgba(41, 18, 13, 0.86);
 }
 
-/* ── Result strip ────────────────────────────────────────── */
+/* ── Blank project starter ───────────────────────────────── */
+
+.blank-starter {
+  padding: 15px 14px 4px;
+}
+
+.blank-starter__head h3 {
+  margin-top: 4px;
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.blank-starter__head p {
+  margin-top: 6px;
+  font-size: 9.5px;
+  line-height: 1.55;
+  color: var(--muted);
+}
+
+.blank-starter__grid {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: 11px;
+}
+
+.blank-starter__grid button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 47px;
+  padding: 7px 8px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: #faf8f1;
+  text-align: left;
+  transition: border-color 120ms ease, background 120ms ease, transform 120ms ease;
+}
+
+.blank-starter__grid button:hover {
+  border-color: var(--line-strong);
+  background: #fffdf8;
+  transform: translateX(2px);
+}
+
+.blank-starter__icon {
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--panel-2);
+  color: var(--accent-deep);
+}
+
+.blank-starter__grid button > span:nth-child(2) {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: 52px;
+}
+
+.blank-starter__grid b {
+  font-size: 10.5px;
+  font-weight: 600;
+}
+
+.blank-starter__grid small {
+  font-family: var(--font-mono);
+  font-size: 6.5px;
+  color: var(--muted-2);
+}
+
+.blank-starter__grid em {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 7px;
+  font-style: normal;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.blank-starter__grid button > svg {
+  color: var(--muted-2);
+}
+
+.blank-starter__note {
+  display: flex;
+  gap: 6px;
+  margin-top: 11px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--muted);
+  font-size: 8px;
+  line-height: 1.5;
+}
+
+.blank-starter__note svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+  color: var(--accent);
+}
+
+/* ── Results strip ───────────────────────────────────────── */
 
 .result-strip {
   flex: 0 0 auto;
@@ -1592,6 +1726,14 @@
 
 .result-strip__chevron {
   display: none;
+}
+
+.result-strip__hint {
+  padding: 0 8px;
+  font-family: var(--font-mono);
+  font-size: 7.5px;
+  color: var(--accent-deep);
+  white-space: nowrap;
 }
 
 @container (max-width: 980px) {

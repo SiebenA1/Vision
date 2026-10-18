@@ -112,12 +112,73 @@ function rod(
 
 function hashDocument(model: ModelDocument): string {
   let hash = 2166136261;
-  const token = model.variables.map((v) => `${v.key}:${v.value.toFixed(4)}`).join('|');
+  const token = `${model.template ?? 'bracket'}|${model.variables.map((v) => `${v.key}:${v.value.toFixed(4)}`).join('|')}`;
   for (let i = 0; i < token.length; i += 1) {
     hash ^= token.charCodeAt(i);
     hash = Math.imul(hash, 16777619);
   }
   return (hash >>> 0).toString(16).padStart(8, '0').toUpperCase();
+}
+
+async function buildPrimitiveGeometry(
+  model: ModelDocument,
+  template: 'plate' | 'block' | 'cylinder',
+  started: number,
+): Promise<{ geometry: GeometryData; featureLog: string[] }> {
+  const runtime = await getKernel();
+  const v = vals(model);
+  const featureLog: string[] = [];
+  let body: ManifoldInstance | null = null;
+  try {
+    if (template === 'cylinder') {
+      const diameter = Math.max(5, v.diameter ?? 60);
+      const height = Math.max(5, v.height ?? 100);
+      const base = runtime.Manifold.cylinder(height, diameter / 2, diameter / 2, 64, true);
+      body = base.translate(0, 0, height / 2);
+      base.delete();
+      featureLog.push(`CYLINDER · Ø${diameter.toFixed(1)} × ${height.toFixed(1)}`);
+    } else {
+      const length = Math.max(5, v.length ?? 120);
+      const width = Math.max(5, v.width ?? 80);
+      const height = template === 'plate' ? Math.max(1, v.thickness ?? 10) : Math.max(5, v.height ?? 60);
+      const base = runtime.Manifold.cube([length, width, height], true);
+      body = base.translate(0, 0, height / 2);
+      base.delete();
+      featureLog.push(`${template.toUpperCase()} · ${length.toFixed(1)} × ${width.toFixed(1)} × ${height.toFixed(1)}`);
+    }
+    if (!body) throw new Error('基础体未生成。');
+    const mesh = body.getMesh();
+    const positions = new Float32Array(mesh.vertProperties);
+    const indices = new Uint32Array(mesh.triVerts);
+    const bounds = body.boundingBox();
+    const volume = body.volume();
+    if (!Number.isFinite(volume) || volume <= 0 || indices.length < 12) {
+      throw new Error('基础体几何无效。');
+    }
+    return {
+      geometry: {
+        positions,
+        indices,
+        bbox: {
+          min: [bounds.min[0], bounds.min[1], bounds.min[2]],
+          max: [bounds.max[0], bounds.max[1], bounds.max[2]],
+        },
+        volumeMm3: volume,
+        areaMm2: body.surfaceArea(),
+        triangleCount: indices.length / 3,
+        vertexCount: positions.length / 3,
+        buildMs: performance.now() - started,
+        watermark: hashDocument(model),
+      },
+      featureLog,
+    };
+  } finally {
+    try {
+      body?.delete();
+    } catch {
+      // Best-effort WASM disposal.
+    }
+  }
 }
 
 /**
@@ -133,6 +194,13 @@ export async function buildGeometry(model: ModelDocument): Promise<{
   featureLog: string[];
 }> {
   const started = performance.now();
+  const template = model.template ?? 'bracket';
+  if (template === 'empty') {
+    throw new Error('空白工程尚未添加基础体。');
+  }
+  if (template !== 'bracket') {
+    return buildPrimitiveGeometry(model, template, started);
+  }
   const runtime = await getKernel();
   const v = vals(model);
   const ctx: BuildContext = { runtime, solids: [], sections: [] };

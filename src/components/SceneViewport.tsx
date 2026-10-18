@@ -375,7 +375,28 @@ export function SceneViewport({
 
   useEffect(() => {
     const context = contextRef.current;
-    if (!context || !geometry) return;
+    if (!context) return;
+    if (!geometry) {
+      disposeObject(context.modelGroup);
+      disposeObject(context.edgeGroup);
+      context.modelGroup.clear();
+      context.edgeGroup.clear();
+      context.loadMaterials = [];
+      context.marker = null;
+      if (context.ground) {
+        context.scene.remove(context.ground);
+        disposeObject(context.ground);
+        context.ground = null;
+      }
+      if (context.grid) {
+        context.scene.remove(context.grid);
+        context.grid.geometry.dispose();
+        const gridMaterials = Array.isArray(context.grid.material) ? context.grid.material : [context.grid.material];
+        gridMaterials.forEach((material) => material.dispose());
+        context.grid = null;
+      }
+      return;
+    }
     disposeObject(context.modelGroup);
     disposeObject(context.edgeGroup);
     context.modelGroup.clear();
@@ -486,7 +507,7 @@ export function SceneViewport({
 
   useEffect(() => {
     const context = contextRef.current;
-    if (!context || !geometry) return;
+    if (!context) return;
     for (const label of context.labels) label.element.remove();
     context.labels = [];
     disposeObject(context.annotationGroup);
@@ -494,6 +515,7 @@ export function SceneViewport({
     context.annotationGroup.visible = showAnnotations;
     context.loadMaterials = [];
     context.marker = null;
+    if (!geometry) return;
     if (!showAnnotations) return;
 
     const support = model.supports[0];

@@ -174,6 +174,7 @@ export function CopilotPanel({ onSend }: CopilotPanelProps) {
   const configured = serverKey || apiKeyPresent;
   const llmError = configured && llmConnectionStatus === 'error';
   const modelLabel = configured ? llmModelLabel(llmSettings) : 'LOCAL PLANNER';
+  const isBlankProject = (model.template ?? 'bracket') === 'empty';
   const streamingDeepSeek = busy && agentSource === 'deepseek';
   const [draft, setDraft] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -268,7 +269,7 @@ export function CopilotPanel({ onSend }: CopilotPanelProps) {
           <Message key={message.id} message={message} onChip={onSend} busy={busy} />
         ))}
 
-        {chat.length <= 1 && (
+        {chat.length <= 1 && !isBlankProject && (
           <div className="suggestion-block">
             {!configured && (
               <button type="button" className="llm-setup-banner" onClick={openSettings}>
@@ -287,6 +288,17 @@ export function CopilotPanel({ onSend }: CopilotPanelProps) {
                 <ArrowUp size={12} />
               </button>
             ))}
+          </div>
+        )}
+
+        {chat.length <= 1 && isBlankProject && (
+          <div className="blank-copilot-hint">
+            <span className="blank-copilot-hint__mark">V</span>
+            <div>
+              <span className="eyebrow">BLANK PROJECT</span>
+              <b>先建立第一块几何</b>
+              <p>在模型面板或视口中央选择基础板、基础块或圆柱体，然后即可分析、优化或让 ATLAS 继续编辑。</p>
+            </div>
           </div>
         )}
 

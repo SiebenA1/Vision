@@ -7,6 +7,7 @@ import { getMaterial } from '../src/core/materials';
 import { parseEngineeringPrompt } from '../src/core/agent/nlu';
 import { buildDeepSeekTools, directionVector } from '../src/core/llm/tools';
 import { isModelDocument, nextProjectCode, seedProjects } from '../src/core/projects';
+import { createBlankModel, createStarterModel } from '../src/core/templates';
 
 describe('parametric geometry kernel', () => {
   it('builds a watertight bracket with positive volume', async () => {
@@ -137,4 +138,36 @@ describe('project library', () => {
     expect(isModelDocument({ schema: 'wrong' })).toBe(false);
     expect(nextProjectCode(projects).startsWith('BRK-')).toBe(true);
   });
+
+  it('creates blank projects and all three starter primitives', async () => {
+    const blank = createBlankModel('空白支架', 'TST-001');
+    expect(blank.template).toBe('empty');
+    expect(blank.variables).toHaveLength(0);
+    expect(blank.features).toHaveLength(0);
+    for (const template of ['plate', 'block', 'cylinder'] as const) {
+      const model = createStarterModel(template, blank);
+      expect(model.template).toBe(template);
+      expect(model.variables.length).toBeGreaterThan(0);
+      const { geometry } = await buildGeometry(model);
+      expect(geometry.volumeMm3).toBeGreaterThan(0);
+      expect(geometry.triangleCount).toBeGreaterThan(0);
+    }
+  }, 60_000);
+
+  it('solves a blank-project plate starter', async () => {
+    const blank = createBlankModel('空白板校核', 'TST-002');
+    const model = createStarterModel('plate', blank);
+    const { geometry } = await buildGeometry(model);
+    const mesh = voxelMesh(geometry, 3500, 3);
+    const solution = solveVoxelMesh(mesh, {
+      material: getMaterial(model.materialId),
+      supports: model.supports,
+      loads: model.loads,
+      tolerance: 1e-4,
+      maxIterations: 1200,
+    });
+    expect(solution.converged).toBe(true);
+    expect(solution.maxVonMises).toBeGreaterThan(0);
+    expect(solution.equilibrium.relativeError).toBeLessThan(1e-4);
+  }, 60_000);
 });

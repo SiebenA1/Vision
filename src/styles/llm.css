@@ -224,6 +224,44 @@
   color: var(--good);
 }
 
+.blank-copilot-hint {
+  display: flex;
+  gap: 9px;
+  margin: 6px 0 0 31px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: #faf8f1;
+}
+
+.blank-copilot-hint__mark {
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(244, 91, 50, 0.28);
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent-deep);
+  font-family: var(--font-display);
+  font-size: 12px;
+}
+
+.blank-copilot-hint b {
+  display: block;
+  margin-top: 2px;
+  font-size: 10.5px;
+  color: var(--ink-soft);
+}
+
+.blank-copilot-hint p {
+  margin-top: 3px;
+  font-size: 8.5px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
 .send-button--stop {
   background: var(--ink);
   color: #f4f1e8;

@@ -42,7 +42,7 @@ await page.getByTitle('打开工程中心').click();
 await page.waitForTimeout(300);
 await page.getByPlaceholder('项目名称').fill('测试派生项目');
 await page.getByPlaceholder('编号（可空）').fill('BRK-099');
-await page.getByRole('button', { name: '创建', exact: true }).click();
+await page.getByRole('button', { name: '派生', exact: true }).click();
 await page.waitForFunction(() => document.body.innerText.includes('BRK-099'), null, { timeout: 20000 });
 await page.waitForTimeout(1200);
 const activeBeforeReload = (await page.locator('body').innerText()).includes('测试派生项目');

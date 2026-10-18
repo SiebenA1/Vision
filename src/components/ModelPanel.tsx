@@ -2,7 +2,9 @@ import { useEffect, useState, type CSSProperties } from 'react';
 import {
   ArrowDownToLine,
   ArrowUpFromLine,
+  Box,
   ChevronRight,
+  Circle,
   CircleDot,
   CircleSlash2,
   Cuboid,
@@ -12,6 +14,7 @@ import {
   Minus,
   Plus,
   RotateCcw,
+  Square,
   Undo2,
   Redo2,
 } from 'lucide-react';
@@ -90,6 +93,66 @@ function featureIcon(feature: FeatureDescriptor) {
   if (feature.kind === 'pattern') return <Layers3 size={12} />;
   if (feature.kind === 'boss') return <CircleDot size={12} />;
   return <Plus size={12} />;
+}
+
+function BlankStarter() {
+  const addStarter = useAppStore((state) => state.initializeStarter);
+  const starters = [
+    {
+      id: 'plate' as const,
+      label: '基础板',
+      en: 'PLATE',
+      description: '矩形板 · 120 × 80 × 10 mm',
+      icon: Square,
+    },
+    {
+      id: 'block' as const,
+      label: '基础块',
+      en: 'BLOCK',
+      description: '实体块 · 100 × 80 × 60 mm',
+      icon: Box,
+    },
+    {
+      id: 'cylinder' as const,
+      label: '圆柱体',
+      en: 'CYLINDER',
+      description: '圆柱 · Ø60 × 100 mm',
+      icon: Circle,
+    },
+  ];
+  return (
+    <div className="blank-starter">
+      <div className="blank-starter__head">
+        <span className="eyebrow">BLANK PROJECT</span>
+        <h3>从基础体开始</h3>
+        <p>
+          当前项目没有几何。选择一个参数化基础体，创建后可在下方继续编辑尺寸、材料和边界条件。
+        </p>
+      </div>
+      <div className="blank-starter__grid">
+        {starters.map((starter) => {
+          const Icon = starter.icon;
+          return (
+            <button key={starter.id} type="button" onClick={() => addStarter(starter.id)}>
+              <span className="blank-starter__icon"><Icon size={18} /></span>
+              <span>
+                <b>{starter.label}</b>
+                <small>{starter.en}</small>
+              </span>
+              <em>{starter.description}</em>
+              <ChevronRight size={13} />
+            </button>
+          );
+        })}
+      </div>
+      <div className="blank-starter__note">
+        <Info size={13} />
+        <span>
+          空白工程会保留材料、单位和工程元数据，但不会提交任何几何或求解结果。当前版本尚未提供自由草图器，基础体是起点。
+        </span>
+      </div>
+    </div>
+  );
 }
 
 function FeatureTree() {
@@ -278,6 +341,7 @@ export function ModelPanel() {
   const model = useAppStore((state) => state.model);
   const material = MATERIALS.find((item) => item.id === model.materialId) ?? MATERIALS[0];
   const toggleLeft = useAppStore((state) => state.toggleLeft);
+  const blank = (model.template ?? 'bracket') === 'empty' || model.features.length === 0;
 
   return (
     <aside className="model-panel">
@@ -287,7 +351,7 @@ export function ModelPanel() {
             {rail === 'materials' ? 'MATERIALS' : rail === 'history' ? 'HISTORY' : 'MODEL GRAPH'}
           </span>
           <h2>
-            {rail === 'materials' ? '材料' : rail === 'history' ? '版本' : '参数化支架'}
+            {rail === 'materials' ? '材料' : rail === 'history' ? '版本' : blank ? '空白工程' : '参数化支架'}
           </h2>
         </div>
         <div className="model-panel__head-right">
@@ -324,40 +388,42 @@ export function ModelPanel() {
                 <span>{model.meta.discipline}</span>
               </div>
             </div>
-            <FeatureTree />
-            <div className="geometry-readout">
-              <div className="panel-section__head">
-                <span>几何健康 / GEOMETRY</span>
-                <span className="chip chip--good">{geometry ? 'WATERTIGHT' : 'WAITING'}</span>
+            {blank ? <BlankStarter /> : <FeatureTree />}
+            {!blank && (
+              <div className="geometry-readout">
+                <div className="panel-section__head">
+                  <span>几何健康 / GEOMETRY</span>
+                  <span className="chip chip--good">{geometry ? 'WATERTIGHT' : 'WAITING'}</span>
+                </div>
+                <div className="readout-grid">
+                  <div>
+                    <span>体积</span>
+                    <b>{metrics ? fmt(metrics.volumeCm3, 1) : '—'}</b>
+                    <small>cm³</small>
+                  </div>
+                  <div>
+                    <span>质量</span>
+                    <b>{metrics ? fmt(metrics.massKg, 3) : '—'}</b>
+                    <small>kg</small>
+                  </div>
+                  <div>
+                    <span>表面</span>
+                    <b>{metrics ? fmt(metrics.surfaceCm2, 0) : '—'}</b>
+                    <small>cm²</small>
+                  </div>
+                  <div>
+                    <span>面片</span>
+                    <b>{metrics ? metrics.triangleCount.toLocaleString('en-US') : '—'}</b>
+                    <small>tri</small>
+                  </div>
+                </div>
+                <div className="hash-row">
+                  <span>HASH</span>
+                  <code>{metrics?.watermark ?? '—'}</code>
+                  <span className="hash-row__time">{metrics ? `${metrics.buildMs.toFixed(0)} ms` : ''}</span>
+                </div>
               </div>
-              <div className="readout-grid">
-                <div>
-                  <span>体积</span>
-                  <b>{metrics ? fmt(metrics.volumeCm3, 1) : '—'}</b>
-                  <small>cm³</small>
-                </div>
-                <div>
-                  <span>质量</span>
-                  <b>{metrics ? fmt(metrics.massKg, 3) : '—'}</b>
-                  <small>kg</small>
-                </div>
-                <div>
-                  <span>表面</span>
-                  <b>{metrics ? fmt(metrics.surfaceCm2, 0) : '—'}</b>
-                  <small>cm²</small>
-                </div>
-                <div>
-                  <span>面片</span>
-                  <b>{metrics ? metrics.triangleCount.toLocaleString('en-US') : '—'}</b>
-                  <small>tri</small>
-                </div>
-              </div>
-              <div className="hash-row">
-                <span>HASH</span>
-                <code>{metrics?.watermark ?? '—'}</code>
-                <span className="hash-row__time">{metrics ? `${metrics.buildMs.toFixed(0)} ms` : ''}</span>
-              </div>
-            </div>
+            )}
             <div className="material-strip">
               <span className="material-strip__swatch" style={{ background: material.color }} />
               <div>

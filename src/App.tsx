@@ -77,6 +77,7 @@ export default function App() {
   const variableSignature = JSON.stringify({
     code: model.code,
     name: model.name,
+    template: model.template ?? 'bracket',
     materialId: model.materialId,
     variables: model.variables.map((variable) => [variable.key, variable.value]),
     loads: model.loads.map((load) => [load.face, load.magnitude, load.vector, load.enabled]),
@@ -140,8 +141,17 @@ export default function App() {
   }, []);
 
   const openAnalysis = () => {
-    useAppStore.getState().openWorkspace('analysis');
     const state = useAppStore.getState();
+    if (!state.geometry && (state.model.template ?? 'bracket') === 'empty') {
+      addToast({
+        title: '空白工程：先添加基础体',
+        detail: '分析工作台需要几何体和网格。请先在模型面板选择基础体。',
+        tone: 'neutral',
+      });
+      if (state.leftCollapsed) state.toggleLeft();
+      return;
+    }
+    useAppStore.getState().openWorkspace('analysis');
     if (!state.analysis && !['mesh', 'solve', 'refine'].includes(state.analysisStatus)) {
       void runStudy({ openWorkspace: true, focusResult: true, silentToast: true });
     } else if (state.analysis) {
@@ -154,6 +164,15 @@ export default function App() {
   };
 
   const runFromStage = () => {
+    if (!useAppStore.getState().geometry) {
+      addToast({
+        title: '空白工程：先添加基础体',
+        detail: '在左侧模型面板或视口中央选择基础板 / 基础块 / 圆柱体。',
+        tone: 'neutral',
+      });
+      if (useAppStore.getState().leftCollapsed) useAppStore.getState().toggleLeft();
+      return;
+    }
     void runStudy({ focusResult: true, silentToast: false });
   };
 
@@ -209,6 +228,15 @@ export default function App() {
     <div className="app-shell">
       <TopBar
         onRunAnalysis={() => {
+          if (!useAppStore.getState().geometry) {
+            addToast({
+              title: '空白工程：先添加基础体',
+              detail: '请选择基础板 / 基础块 / 圆柱体，再运行静力校核。',
+              tone: 'neutral',
+            });
+            if (useAppStore.getState().leftCollapsed) useAppStore.getState().toggleLeft();
+            return;
+          }
           useAppStore.getState().openWorkspace('analysis');
           void runStudy({ openWorkspace: true, focusResult: true, silentToast: false });
         }}

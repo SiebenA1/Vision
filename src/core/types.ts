@@ -2,6 +2,7 @@ export type Vec3 = [number, number, number];
 export type Axis = 'x' | 'y' | 'z';
 export type FaceId = 'x-min' | 'x-max' | 'y-min' | 'y-max' | 'z-min' | 'z-max';
 export type UnitSystem = 'mm-N-MPa';
+export type GeometryTemplate = 'bracket' | 'plate' | 'block' | 'cylinder' | 'empty';
 
 export type VariableGroup = '主控尺寸' | '连接结构' | '轻量化';
 export type VariableRole = 'primary' | 'secondary';
@@ -67,6 +68,7 @@ export interface ModelDocument {
   name: string;
   subtitle: string;
   revision: string;
+  template?: GeometryTemplate;
   units: UnitSystem;
   materialId: string;
   variables: DesignVariable[];

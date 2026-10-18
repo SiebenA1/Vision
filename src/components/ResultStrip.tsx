@@ -29,6 +29,8 @@ export function ResultStrip({ onRun, onOpenAnalysis }: ResultStripProps) {
   const busy = ['mesh', 'solve', 'refine', 'queued'].includes(status);
   const sf = analysis?.safetyFactor ?? 0;
   const sfTone = sf >= 2 ? 'good' : sf >= 1 ? 'warn' : 'bad';
+  const mass = analysis?.massKg ?? metrics?.massKg;
+  const isBlank = useAppStore((state) => (state.model.template ?? 'bracket') === 'empty');
   const progressPercent = Math.min(100, Math.max(2, progress?.percent ?? (status === 'ready' ? 100 : 0)));
 
   return (
@@ -66,7 +68,7 @@ export function ResultStrip({ onRun, onOpenAnalysis }: ResultStripProps) {
           <div>
             <span className="metric__label">质量 MASS</span>
             <div className="metric__value">
-              <b>{fmt(analysis?.massKg ?? metrics?.massKg ?? 0, 3)}</b>
+              <b>{mass !== undefined ? fmt(mass, 3) : '—'}</b>
               <small>kg</small>
             </div>
           </div>
@@ -156,10 +158,13 @@ export function ResultStrip({ onRun, onOpenAnalysis }: ResultStripProps) {
             <RefreshCw size={13} /> 刷新结果
           </button>
         )}
-        {!analysis && !busy && (
+        {!analysis && !busy && !isBlank && (
           <button type="button" className="button button--ghost" onClick={onRun}>
             <Play size={13} /> 运行基线校核
           </button>
+        )}
+        {isBlank && !busy && (
+          <span className="result-strip__hint">空白工程 · 请先添加基础体</span>
         )}
         <button type="button" className="button button--dark" onClick={onOpenAnalysis}>
           分析工作台 <ArrowUpRight size={14} />
