@@ -83,7 +83,7 @@ export function createBlankProjectModel(code = 'CAD-000', name = '空白工程')
     mesh: {
       targetElements: 7000,
       cellSizeMm: 4,
-      elementType: 'C3D8',
+      elementType: 'C3D4',
       tolerance: 1e-4,
       maxIterations: 2400,
       boundaryPolicy: 'conservative-voxel',

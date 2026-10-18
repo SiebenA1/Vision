@@ -57,9 +57,8 @@ export function buildReportMarkdown(
 
 ## 3. 几何与参数
 
-- 几何内核：Manifold watertight mesh-boolean kernel
-- 网格：${result.mesh.elements.toLocaleString('en-US')} 个 C3D8 单元 / ${result.mesh.nodes.toLocaleString('en-US')} 节点
-- 悬臂长度：${fmt(model.variables.find((v) => v.key === 'armLength')?.value ?? 0, 1)} mm
+- 几何内核：build123d / OCCT B-Rep（脚本可重放）
+- 网格：${result.mesh.elements.toLocaleString('en-US')} 个 ${result.solver.method === 'SfePy' ? 'C3D4 四面体' : 'C3D8 六面体'}单元 / ${result.mesh.nodes.toLocaleString('en-US')} 节点
 - 模型指纹：\`${result.modelHash}\`（参数 + 几何版本）
 - 网格指纹：\`${result.id}\`
 
@@ -71,14 +70,13 @@ ${rows}
 
 ## 4. 有限元模型
 
-- 单元类型：8 节点三线性六面体（C3D8 / Hex8），2×2×2 Gauss 全积分
-- 网格策略：结构化体素网格；仅保留八角点均在 watertight 边界内的单元；自动移除不连通体素岛
-- 网格尺寸：h = ${fmt(result.mesh.cellSize, 3)} mm；网格 ${result.mesh.grid.join(' × ')}
+- 单元类型：${result.solver.method === 'SfePy' ? '4 节点线性四面体（C3D4），SfePy P1' : '8 节点三线性六面体（C3D8 / Hex8），2×2×2 Gauss 全积分'}
+- 网格策略：${result.solver.method === 'SfePy' ? 'Gmsh 3D tetrahedral mesh from OCCT STEP' : '结构化体素网格'}
+- 网格尺寸：h = ${fmt(result.mesh.cellSize, 3)} mm
 - 自由度：${result.mesh.dofs.toLocaleString('en-US')} DOF
-- 单元质量：scaled Jacobian = ${fmt(result.mesh.quality.minScaledJacobian, 3)}；最大长宽比 = ${fmt(result.mesh.quality.maxAspectRatio, 2)}；负体积单元 = ${result.mesh.quality.negativeElements}
-- 材料本构：各向同性线弹性；各向同性硬化未启用
-- 求解器：矩阵自由 PCG + Jacobi 预条件；相对残差容差 ${model.mesh.tolerance.toExponential(1)}；迭代 ${result.solver.iterations} 次
-- 收敛：${result.solver.converged ? 'CONVERGED' : 'NOT CONVERGED'}；‖r‖/‖f‖ = ${result.solver.relativeResidual.toExponential(3)}
+- 材料本构：各向同性线弹性
+- 求解器：${result.solver.method === 'SfePy' ? 'Gmsh + SfePy 直接法' : '矩阵自由 PCG + Jacobi 预条件'}
+- 收敛：${result.solver.converged ? 'CONVERGED' : 'NOT CONVERGED'}
 - 墙钟时间：网格 ${fmt(result.solver.meshMs, 0)} ms；求解 ${fmt(result.solver.solveMs, 0)} ms
 - 应变能：${fmt(result.solver.strainEnergyMj, 2)} mJ
 
@@ -135,7 +133,7 @@ ${warnings}
 - 模型版本：${model.revision}
 - 模型指纹：\`${result.modelHash}\`
 - 求解时间：${new Date(result.createdAt).toISOString()}
-- 求解器：VISION C3D8 / PCG-Jacobi v0.1
+- 求解器：${result.solver.method === 'SfePy' ? 'Gmsh + SfePy / OCCT STEP' : 'VISION C3D8 / PCG-Jacobi v0.1'}
 - 结果状态：${result.status.toUpperCase()}
 - 签名：____________________（分析）　____________________（复核）
 

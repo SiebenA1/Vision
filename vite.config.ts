@@ -43,7 +43,7 @@ export default defineConfig(({ mode }) => {
 
   const proxy = {
     '/api/engineering': {
-      target: process.env.VISION_ENGINEERING_URL || 'http://127.0.0.1:8101',
+      target: process.env.VISION_ENGINEERING_URL || 'http://127.0.0.1:8105',
       changeOrigin: false,
       timeout: 300_000,
       proxyTimeout: 300_000,

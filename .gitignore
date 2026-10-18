@@ -13,3 +13,8 @@ dist-ssr
 playwright-report
 test-results
 screenshots
+
+# Native engineering backend artifacts
+server/.fea_runs/
+server/.fea_tmp/
+__pycache__/

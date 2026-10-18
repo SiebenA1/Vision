@@ -33,6 +33,38 @@ export interface CadExecutionResult {
   stlBytes: number;
 }
 
+export interface FeaSolveResult {
+  schema: 'vision.fea/1';
+  nodes: number;
+  elements: number;
+  dofs: number;
+  h: number;
+  volume_mm3: number;
+  mass_kg: number;
+  maxVonMises: number;
+  maxVonMisesLocation: [number, number, number];
+  maxDisplacement: number;
+  maxDisplacementLocation: [number, number, number];
+  safetyFactor: number;
+  positions: number[];
+  displacement: number[];
+  vonMises: number[];
+  loadArea: number;
+}
+
+export interface FeaValidation {
+  caseId: string;
+  name: string;
+  reference: number;
+  computed: number;
+  errorPercent: number;
+  passed: boolean;
+  tolerancePercent: number;
+  formula: string;
+  meshElements: number;
+  solveMs: number;
+}
+
 export class EngineeringBackendError extends Error {
   readonly status: number;
   readonly detail?: string;
@@ -81,6 +113,45 @@ export async function executeBuild123d(
     signal,
   });
   return parseResponse<CadExecutionResult>(response);
+}
+
+export interface FeaSolveInput {
+  script: string;
+  material: {
+    E: number;
+    nu: number;
+    rho: number;
+    yieldStrength: number;
+  };
+  supports: Array<{ face: string; enabled?: boolean }>;
+  loads: Array<{
+    face: string;
+    vector: [number, number, number];
+    magnitude: number;
+    enabled?: boolean;
+  }>;
+  meshSize: number;
+}
+
+export async function solveFea(input: FeaSolveInput, signal?: AbortSignal): Promise<FeaSolveResult> {
+  const response = await fetch('/api/engineering/fea/solve', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      script: input.script,
+      material: input.material,
+      supports: input.supports,
+      loads: input.loads,
+      mesh_size: input.meshSize,
+    }),
+    signal,
+  });
+  return parseResponse<FeaSolveResult>(response);
+}
+
+export async function validateFea(signal?: AbortSignal): Promise<FeaValidation> {
+  const response = await fetch('/api/engineering/fea/validate', { method: 'POST', signal });
+  return parseResponse<FeaValidation>(response);
 }
 
 export function stlBase64ToBytes(base64: string): Uint8Array {

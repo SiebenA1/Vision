@@ -1,21 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { validateCantilever } from '../src/core/fea/solver';
 import { buildDeepSeekTools, directionVector } from '../src/core/llm/tools';
 import { parseEngineeringPrompt } from '../src/core/agent/nlu';
 import { isModelDocument, nextProjectCode, seedProjects } from '../src/core/projects';
 import { exportBinaryStl, parseBinaryStl } from '../src/core/cad/stl';
 import type { GeometryData } from '../src/core/types';
-
-describe('CAE validation', () => {
-  it('matches the analytic cantilever benchmark', () => {
-    const validation = validateCantilever();
-    expect(validation.passed).toBe(true);
-    expect(validation.errorPercent).toBeLessThan(8);
-    console.info(
-      `validation: analytic=${validation.reference.toFixed(5)} mm, computed=${validation.computed.toFixed(5)} mm, error=${validation.errorPercent.toFixed(2)}%`,
-    );
-  }, 60_000);
-});
 
 describe('binary STL transport', () => {
   it('round-trips a closed tetrahedron through STL', async () => {

@@ -12,7 +12,6 @@ import type {
   ValidationResult,
   WorkspaceId,
 } from '../core/types';
-import type { SolveProgress } from '../core/fea/client';
 import {
   createBlankProjectModel,
   isModelDocument,
@@ -24,6 +23,12 @@ import {
 import { base64ToUint8, parseBinaryStl } from '../core/cad/stl';
 import { createExternalModel, type ExternalModelInput } from '../core/cad/external';
 import { getMaterial, massFromVolume, type MaterialSpec } from '../core/materials';
+
+export interface SolveProgress {
+  phase: 'mesh' | 'solve' | 'refine';
+  percent: number;
+  detail: string;
+}
 
 function cloneModel<T>(value: T): T {
   return structuredClone(value);

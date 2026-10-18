@@ -5,3 +5,4 @@ gmsh==4.15.2
 sfepy>=2026.3
 numpy
 scipy
+meshio

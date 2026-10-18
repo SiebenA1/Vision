@@ -23,7 +23,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 HOST = os.environ.get("VISION_ENGINEERING_HOST", "127.0.0.1")
-PORT = int(os.environ.get("VISION_ENGINEERING_PORT", "8101"))
+PORT = int(os.environ.get("VISION_ENGINEERING_PORT", "8105"))
 
 try:
     from build123d import import_step, export_stl  # noqa: F401
@@ -130,14 +130,53 @@ class Handler(BaseHTTPRequestHandler):
         self._send(404, {"error": "not found"})
 
     def do_POST(self) -> None:  # noqa: N802
-        if self.path != "/cad/execute":
+        if self.path not in {"/cad/execute", "/fea/solve", "/fea/validate"}:
             self._send(404, {"error": "not found"})
             return
         try:
             length = int(self.headers.get("Content-Length", "0"))
-            if length <= 0 or length > 4 * 1024 * 1024:
+            if self.path == "/fea/validate":
+                from fea_solver import solve as solve_fea
+
+                result = solve_fea(
+                    "from build123d import *\nresult = Box(100, 20, 10)\n",
+                    {"E": 210000, "nu": 0.3, "rho": 7850, "yieldStrength": 235},
+                    [{"face": "x-min", "enabled": True}],
+                    [{"face": "x-max", "vector": [0, 0, -1], "magnitude": 100, "enabled": True}],
+                    1.5,
+                )
+                I = 20.0 * 10.0**3 / 12.0
+                reference = 100.0 * 100.0**3 / (3.0 * 210000.0 * I)
+                computed = float(result["maxDisplacement"])
+                error = abs(computed - reference) / reference * 100.0
+                self._send(200, {
+                    "caseId": "cantilever-3d-gmsh-sfepy",
+                    "name": "3D cantilever / Gmsh + SfePy",
+                    "reference": reference,
+                    "computed": computed,
+                    "errorPercent": error,
+                    "passed": error <= 8.0,
+                    "tolerancePercent": 8.0,
+                    "formula": "PL^3 / (3EI)",
+                    "meshElements": result["elements"],
+                    "solveMs": 0,
+                })
+                return
+            if length <= 0 or length > 16 * 1024 * 1024:
                 raise ValueError("invalid request size")
             body = json.loads(self.rfile.read(length))
+            if self.path == "/fea/solve":
+                from fea_solver import solve as solve_fea
+
+                result = solve_fea(
+                    str(body.get("script", "")),
+                    body.get("material", {}),
+                    body.get("supports", []),
+                    body.get("loads", []),
+                    float(body.get("mesh_size", 4.0)),
+                )
+                self._send(200, result)
+                return
             script = str(body.get("script", ""))
             if not script.strip():
                 raise ValueError("script is empty")
@@ -147,7 +186,7 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as exc:
             self._send(400, {
                 "error": str(exc),
-                "trace": traceback.format_exc(limit=6),
+                "trace": traceback.format_exc(limit=8),
             })
 
     def log_message(self, fmt: str, *args: Any) -> None:

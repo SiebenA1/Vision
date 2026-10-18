@@ -81,7 +81,7 @@ export interface Load {
 export interface MeshSettings {
   targetElements: number;
   cellSizeMm?: number;
-  elementType: 'C3D8';
+  elementType: 'C3D4';
   tolerance: number;
   maxIterations: number;
   boundaryPolicy: 'conservative-voxel';
@@ -178,8 +178,8 @@ export interface MeshStats {
 }
 
 export interface SolverStats {
-  method: 'PCG';
-  preconditioner: 'Jacobi';
+  method: 'SfePy';
+  preconditioner: 'Direct';
   iterations: number;
   residual: number;
   relativeResidual: number;

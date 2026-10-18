@@ -69,7 +69,7 @@ export function createExternalModel(input: ExternalModelInput): {
       description: '通用占位载荷 · 需按实际工况修改',
     },
   ];
-  model.mesh = { ...model.mesh, cellSizeMm: 4 };
+  model.mesh = { ...model.mesh, cellSizeMm: 1.5, elementType: 'C3D4' };
   model.meta.created = new Date().toISOString().slice(0, 10);
   model.meta.designIntent =
     '由 build123d/OCCT 生成的精确 B-Rep 几何。载荷与约束为通用占位，必须在分析前按工程工况确认。';
