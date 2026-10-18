@@ -14,13 +14,15 @@
 
 VISION 是一个运行在浏览器里的 AI 原生工程工作台原型。它把自然语言作为第一等输入，把参数化特征、线弹性有限元、设计变量优化和工程报告串成闭环：
 
-- **语言交互**：中文 / English 意图 → 受控工具调用（改参数、换材料、加载荷、改约束、求解、优化、生成报告）。
+- **语言交互**：中文 / English 意图 → DeepSeek 流式工具调用，或本地确定性规划器回退；可改参数、换材料、加载荷、改约束、求解、优化、生成报告。
+- **完整大模型能力**：`deepseek-flash` / `deepseek-v4-pro`、thinking 模式与 reasoning effort、SSE 流式输出、多轮工具调用、reasoning_content 回放、token usage、失败回退。
+- **本地安全网关**：Vite 代理转发到 DeepSeek 固定域名，避免浏览器 CORS；支持浏览器会话 Key 或服务端 `DEEPSEEK_API_KEY` 注入。
 - **参数化建模**：7 个特征、14 个设计变量，基于 Manifold 的 watertight mesh-boolean 内核实时重建。
 - **真实 CAE**：C3D8 六面体网格、线弹性静力、矩阵自由 PCG + Jacobi，全部在浏览器 Worker 中运行。
 - **工程证据**：解析基准验证、反力平衡、PCG 残差、网格质量、模型指纹、限制声明与 Markdown 报告。
 - **FE-in-the-loop 优化**：并行 Worker 设计空间搜索，多候选细网格复核回退，输出最小质量可行解。
 - **按需组件**：分析工作台、优化工作台、报告模块、求解 Worker 全部走独立 lazy chunk，首屏不加载重型工作区。
-- **本地优先**：没有后端、没有外部模型 API、没有几何数据上传。打开页面即可运行。
+- **本地优先**：几何、FEA、优化、报告全部在浏览器内运行；唯一可选出站请求是经本地网关的 DeepSeek 对话，且不发送原始网格数组。打开页面即可运行。
 
 当前示例项目：**BRK-042 · 轻量悬挂支架**。  
 AL 6061-T6，600 N 端载，四螺栓背板固定，目标 **SF ≥ 2.0**。
@@ -48,11 +50,43 @@ npm run preview
 验证：
 
 ```bash
-npm test          # 几何 / 求解器 / 解析器 / 基准
+npm test          # 7/7：几何 / 求解器 / 解析器 / DeepSeek 工具契约
 npm run typecheck
 ```
 
+可选浏览器验收（需要本机 Edge + `playwright-core`）：
+
+```bash
+node scripts/screenshot.mjs          # 工作台 / 结果场 / 分析工作台
+node scripts/deepseek-mock-test.mjs  # 流式 reasoning + tool call + 工具结果回放
+```
+
 > 首次打开会自动执行一次基线校核。当前机器上的浏览器 Worker 完成 5k 级单元求解约 8–12 秒；期间界面会显示网格与 PCG 进度。若只想浏览设计，可等待“校核完成”后操作。
+
+### 启用 DeepSeek 大模型
+
+VISION 内嵌一个本地 Vite 网关，把 `/api/deepseek/*` 转发到 `https://api.deepseek.com`，避免浏览器直连的 CORS 问题。
+
+**推荐：服务器端注入 Key（浏览器看不到密钥）**
+
+```bash
+# .env（不要提交到 git）
+DEEPSEEK_API_KEY=sk-...
+```
+
+然后重启 `npm run dev` 或 `npm run preview`。应用会自动检测服务端 Key，ATLAS 头部显示 `DEEPSEEK`。
+
+**浏览器端配置**
+
+打开右侧 ATLAS 头部的 `LOCAL` / `DEEPSEEK` 状态或齿轮按钮，粘贴 API Key：
+
+- 默认只保存在 `sessionStorage`，关闭标签页即失效；
+- 勾选“在本机记住 Key”后才写入 `localStorage`；
+- 共享设备不建议勾选；
+- 配置页可测试连接、切换模型、调整 thinking / reasoning effort / streaming / temperature / max tokens。
+
+`.env.example` 提供了模板。若在静态托管环境部署，需要自行提供等价的 `/api/deepseek/*` 反向代理；否则页面会检测到网关不可用并回退本地规划器。
+
 
 ---
 
@@ -85,7 +119,24 @@ npm run typecheck
 | `explain_risk` | 基于真实结果生成热点与裕度解释 |
 | `export_report` | 生成并下载工程校核报告 |
 
-规划器目前是**确定性本地规划器**：相同输入 + 相同模型 → 相同工具序列。这样做是为了让演示可复现、无需 API key。`AgentPlan` / `AgentAction` 是稳定契约，后续可以无缝替换为 LLM planner 或 MCP 工具层，而不用改执行器。
+### 双规划器
+
+| 模式 | 说明 |
+|---|---|
+| **DeepSeek** | 流式 Chat Completions + 工具调用，模型自行选择工具、组织多轮论证并解释结果；支持 thinking / reasoning_content 回放。 |
+| **Local fallback** | 确定性中文/English 解析器；无 Key、网关不可用、401/429/网络失败时自动回退，保证工作台仍可操作。 |
+
+DeepSeek 模式的关键工程约束：
+
+- 工具参数在浏览器侧再次校验，模型不能写任意文件或执行任意代码；
+- 系统提示注入当前模型、材料、变量、边界条件、最近一次求解结果和验证基准；
+- `set_variable` / `set_material` / `set_load` / `set_support` 会让旧结果失效；
+- `run_analysis` 调用真实 FEA，数值只来自求解器返回；
+- `optimize` 是异步的，模型不会在搜索完成前伪造优化结果；
+- thinking + tools 模式下，完整 `reasoning_content` 会被回放到后续请求，避免 400；
+- 所有对话都只能经本地网关访问 DeepSeek。
+
+`AgentAction` / `DeepSeekTool` 是稳定契约。工具 schema 位于 `src/core/llm/tools.ts`，执行器位于 `src/services/agentTools.ts`。
 
 ---
 
@@ -97,13 +148,20 @@ npm run typecheck
 │  React UI shell                                                        │
 │  ├─ Top bar / tool rail / model graph / result strip                   │
 │  ├─ SceneViewport (Three.js + CSS2D)                                   │
-│  ├─ ATLAS copilot ────────► deterministic planner (NLU → AgentAction)  │
+│  ├─ ATLAS copilot ────────► DeepSeek planner (stream + tools)          │
+│  │                          └─ fallback: deterministic planner         │
 │  └─ lazy chunks: AnalysisWorkspace / OptimizationWorkspace / report    │
 │                                                                        │
-│  Zustand store                                                         │
+│  Zustand stores                                                       │
 │  ├─ model + variable history + undo/redo                               │
 │  ├─ geometry + mesh + result provenance                                │
+│  ├─ LLM settings / gateway status / usage                               │
 │  └─ UI modes / chat / toasts                                           │
+│                                                                        │
+│  Local Vite gateway (same origin)                                      │
+│  ├─ /api/deepseek/* → https://api.deepseek.com (SSE pass-through)      │
+│  ├─ server-side DEEPSEEK_API_KEY injection (optional)                  │
+│  └─ no arbitrary target URL (SSRF guard)                               │
 │                                                                        │
 │  Geometry kernel (main thread WASM)                                    │
 │  └─ manifold-3d → rounded profiles, booleans, watertight check         │
@@ -121,7 +179,8 @@ npm run typecheck
 │  └─ deterministic candidate set / traceable recommendation             │
 └────────────────────────────────────────────────────────────────────────┘
 
-No server. No data upload. No external model dependency at runtime.
+Local solver and geometry data stay in the browser. The only outbound
+traffic is optional DeepSeek chat through the local gateway.
 ```
 
 ### 关键模块
@@ -134,8 +193,16 @@ No server. No data upload. No external model dependency at runtime.
 | `src/core/fea/solver.ts` | 边界条件、PCG、应力恢复、平衡校核、解析基准 |
 | `src/core/fea/worker.ts` | 网格 / 求解 / 验证 Worker |
 | `src/core/optimization/optimizer.ts` | 并行候选搜索、细化、最终复核 |
-| `src/core/agent/nlu.ts` | 中英文工程意图解析 |
-| `src/services/agent.ts` | 工具执行、流式计划步骤、解释与报告 |
+| `src/core/agent/nlu.ts` | 中英文工程意图解析（本地回退） |
+| `src/core/llm/client.ts` | DeepSeek Chat Completions + SSE 流解析 |
+| `src/core/llm/tools.ts` | 工具 JSON Schema + 模型上下文 |
+| `src/core/llm/prompt.ts` | ATLAS 系统提示与安全边界 |
+| `src/services/deepseekAgent.ts` | 多轮工具调用、reasoning_content 回放、流式 UI |
+| `src/services/agentTools.ts` | 工具参数校验与工程执行器 |
+| `src/state/llmStore.ts` | 模型设置、网关状态、连接测试、token usage |
+| `src/components/LlmSettingsModal.tsx` | DeepSeek 配置与连接测试 |
+| `vite.config.ts` | 本地 DeepSeek 网关 / 状态端点 |
+| `src/services/agent.ts` | 双规划器编排、失败回退、取消生成 |
 | `src/components/SceneViewport.tsx` | Three.js 场景、结果场投影、标注、视图控制 |
 | `src/features/analysis/*` | 按需加载的分析工作台 |
 | `src/features/optimize/*` | 按需加载的优化工作台 |
@@ -225,6 +292,12 @@ dist/assets/manifold-*.wasm
 |---|---|
 | ![优化](docs/assets/optimization.png) | ![ATLAS](docs/assets/agent.png) |
 
+| DeepSeek 配置 | DeepSeek 流式工具调用 |
+|---|---|
+| ![DeepSeek 设置](docs/assets/deepseek-settings.png) | ![DeepSeek 对话](docs/assets/deepseek-chat.png) |
+
+> 对话截图使用本地 SSE mock 验证了“流式 reasoning + tool call + 工具结果回传 + 最终回答”的完整 UI 闭环；真实 DeepSeek 调用需要配置 API Key。配置页截图中输入的是 mock key。
+
 ---
 
 ## 8. 目录
@@ -232,19 +305,22 @@ dist/assets/manifold-*.wasm
 ```text
 .
 ├─ src/
-│  ├─ core/            # 几何、FEA、优化、材料、报告、Agent NLU
-│  ├─ components/      # 工作台壳、场景、面板、结果条
+│  ├─ core/            # 几何、FEA、优化、材料、报告、Agent
+│  │  ├─ llm/          # DeepSeek client / tools / prompt / types
+│  │  └─ agent/        # 本地意图解析
+│  ├─ components/      # 工作台壳、场景、面板、DeepSeek 设置
 │  ├─ features/        # 按需加载的分析 / 优化工作台
-│  ├─ services/        # 求解编排、Agent 工具执行
-│  ├─ state/           # Zustand 应用状态
-│  ├─ styles/          # tokens + base + panels + workspaces
+│  ├─ services/        # 双规划器、求解编排、工具执行
+│  ├─ state/           # Zustand app + LLM stores
+│  ├─ styles/          # tokens + base + panels + workspaces + llm
 │  └─ lib/             # 格式化
 ├─ tests/              # 几何 / 求解器 / 解析器用例
 ├─ docs/
 │  ├─ architecture.md
 │  ├─ engineering-method.md
 │  └─ assets/
-└─ scripts/            # 可选的浏览器截图 / 冒烟验证脚本
+├─ vite.config.ts      # DeepSeek 本地网关 + 状态端点
+└─ scripts/            # 可选的浏览器截图 / mock 冒烟测试
 ```
 
 ---
@@ -257,7 +333,8 @@ dist/assets/manifold-*.wasm
 4. **载荷与约束是理想化的**：节点带等分载荷、6-DOF 固定面；没有连接件柔度或基础柔度。
 5. **单变量优化**：当前优化器对单一变量做有界搜索，不是多变量/拓扑优化。
 6. **没有材料认证**：材料库用于概念筛选，不可替代材料规范、试验与许用值批准。
-7. **AI planner 是确定性的**：当前不调用外部 LLM；这是为了本地可复现。接入 LLM 时应保留同样的工具白名单与人工确认边界。
+7. **LLM 不是求解器**：DeepSeek 只负责规划工具调用和组织解释；所有应力、位移、安全系数、质量、网格数来自本地求解器与工具结果。模型仍可能选错工具、选错变量或给出不完整解释，必须人工复核。thinking + tools 的完整 `reasoning_content` 会随历史回放，避免 API 400。
+8. **DeepSeek 依赖本地网关**：浏览器直连 DeepSeek 可能被 CORS 阻止；本项目通过 Vite 代理访问固定域名。静态部署需要自备反向代理。无 Key、网关不可用或 API 失败时会回退本地规划器。
 
 ---
 
@@ -267,13 +344,24 @@ dist/assets/manifold-*.wasm
 - 四面体 / 高阶单元 + 自适应 h-refinement；边界层/接触。
 - 多变量贝叶斯优化 + Pareto 前沿 + 制造约束。
 - 模态、热-结构耦合、疲劳、屈曲与非线性塑性。
-- LLM planner / MCP server 适配层；工具调用审计与人工批准门。
+- MCP server 适配层；工具调用审计、审批门与可回放会话日志。
+- LLM 辅助的网格/材料建议，但必须由求解器与工程师复核。
 - STEP/JT 导入，装配层级与配合约束。
 - CRDT 协作、模型版本图、审批工作流。
 
 ---
 
-## 11. License
+## 11. References
+
+- [DeepSeek API Docs](https://api-docs.deepseek.com/)
+- [Chat Completions API](https://api-docs.deepseek.com/api/create-chat-completion)
+- [Tool Calls](https://api-docs.deepseek.com/guides/tool_calls)
+- [Thinking Mode](https://api-docs.deepseek.com/guides/thinking_mode)
+- [DeepSeek API Keys](https://platform.deepseek.com/api_keys)
+
+---
+
+## 12. License
 
 MIT. See [LICENSE](LICENSE).
 

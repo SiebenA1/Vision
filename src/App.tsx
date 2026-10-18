@@ -1,13 +1,16 @@
 import { Suspense, lazy, useEffect, useRef } from 'react';
 import { AlertTriangle, CheckCircle2, Info, X } from 'lucide-react';
 import { TopBar } from './components/TopBar';
+import { LlmSettingsModal } from './components/LlmSettingsModal';
 import { ToolRail } from './components/ToolRail';
 import { ModelPanel } from './components/ModelPanel';
 import { ViewportStage } from './components/ViewportStage';
 import { CopilotPanel } from './components/CopilotPanel';
 import { useAppStore } from './state/store';
+import { useLlmStore } from './state/llmStore';
 import { runStudy } from './services/simulation';
 import { sendAgentPrompt } from './services/agent';
+import { resetDeepSeekConversation } from './services/deepseekAgent';
 import { fmt } from './lib/format';
 
 const AnalysisWorkspace = lazy(() => import('./features/analysis/AnalysisWorkspace'));
@@ -65,12 +68,15 @@ export default function App() {
   const leftCollapsed = useAppStore((state) => state.leftCollapsed);
   const toggleLeft = useAppStore((state) => state.toggleLeft);
   const addToast = useAppStore((state) => state.addToast);
+  const settingsOpen = useLlmStore((state) => state.settingsOpen);
+  const closeLlmSettings = useLlmStore((state) => state.closeSettings);
   const autoSolved = useRef(false);
   const firstModelEffect = useRef(true);
   const variableSignature = model.variables.map((variable) => `${variable.key}:${variable.value}`).join('|');
 
   useEffect(() => {
     void useAppStore.getState().rebuildGeometry();
+    void useLlmStore.getState().refreshGateway();
   }, []);
 
   useEffect(() => {
@@ -166,6 +172,7 @@ export default function App() {
   const reset = () => {
     if (!window.confirm('重置为 BRK-042 示例项目？当前未导出的编辑和结果将丢失。')) return;
     useAppStore.getState().resetProject();
+    resetDeepSeekConversation();
     autoSolved.current = false;
     window.setTimeout(() => {
       void useAppStore.getState().rebuildGeometry();
@@ -184,6 +191,7 @@ export default function App() {
         onExportModel={() => void exportModel()}
         onExportReport={() => void exportReport()}
         onReset={reset}
+        onOpenLlmSettings={() => useLlmStore.getState().openSettings()}
       />
       <div className="app-body">
         <ToolRail onOpenAnalysis={openAnalysis} onOpenOptimize={openOptimize} />
@@ -220,6 +228,8 @@ export default function App() {
           />
         </Suspense>
       )}
+
+      {settingsOpen && <LlmSettingsModal onClose={closeLlmSettings} />}
     </div>
   );
 }

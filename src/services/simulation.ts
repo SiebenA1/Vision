@@ -22,11 +22,21 @@ export interface RunStudyOptions {
 }
 
 export async function runStudy(options: RunStudyOptions = {}): Promise<AnalysisResult | null> {
-  const token = ++runToken;
-  const store = useAppStore.getState();
-  if (store.analysisStatus === 'mesh' || store.analysisStatus === 'solve' || store.analysisStatus === 'refine') {
-    return store.analysis;
+  const busyStates = ['mesh', 'solve', 'refine'];
+  if (busyStates.includes(useAppStore.getState().analysisStatus)) {
+    const started = Date.now();
+    while (busyStates.includes(useAppStore.getState().analysisStatus) && Date.now() - started < 120_000) {
+      await new Promise((resolve) => window.setTimeout(resolve, 120));
+    }
+    const settled = useAppStore.getState();
+    if (settled.analysis && !settled.resultStale && settled.analysisStatus === 'ready') {
+      return settled.analysis;
+    }
+    // The in-flight result belongs to an older geometry. Fall through and run
+    // a fresh solve against the current model instead of returning stale data.
   }
+
+  const token = ++runToken;
   const { model, geometry, building } = useAppStore.getState();
   if (building) {
     await new Promise<void>((resolve) => {

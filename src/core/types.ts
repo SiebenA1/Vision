@@ -234,10 +234,20 @@ export interface ChatMessage {
   createdAt: number;
   steps?: ChatPlanStep[];
   streaming?: boolean;
+  reasoning?: string;
+  latencyMs?: number;
+  usage?: {
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+    reasoningTokens?: number;
+  };
   meta?: {
     kind?: 'insight' | 'action' | 'report' | 'question';
     chips?: string[];
     tool?: string;
+    source?: 'deepseek' | 'local' | 'system';
+    model?: string;
   };
 }
 

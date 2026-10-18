@@ -233,7 +233,37 @@ Limitations:
 - Mesh topology still changes with geometry, so SF is non-smooth; fixed h reduces but does not eliminate this.
 - Verification uses the same fixed h, not a fully converged mesh.
 
-## 9. Report contents
+## 9. AI agent boundary
+
+VISION supports two planners:
+
+- **DeepSeek** (`deepseek-flash` / `deepseek-v4-pro`) with streaming tool calls and optional thinking mode.
+- **Local deterministic planner** as a fallback.
+
+The LLM is not part of the numerical method. It may:
+
+- choose a registered engineering tool and supply parameters;
+- request a solver run;
+- summarize tool results;
+- propose a next action.
+
+It may not:
+
+- invent stress, displacement, SF, mass, mesh or validation values;
+- bypass tool validation;
+- alter the solver, mesh policy or material definitions;
+- write arbitrary files or execute arbitrary code;
+- claim an optimization result before the async search completes.
+
+Every numerical value in a final answer must originate from a `tool` message containing the current solver result. Tool result JSON includes the model state and result provenance so the model can reason about staleness.
+
+DeepSeek thinking `reasoning_content` is displayed in a collapsible block for transparency, but it is **not** engineering evidence. It is model reasoning and may be wrong. The signed report is generated only from the solver result, not from the chat transcript.
+
+If the LLM is unavailable or returns an error, the local planner executes the same validated tools. If both fail, the error is preserved in the conversation and the model state is not mutated beyond successful tool calls.
+
+Security: the browser calls a local same-origin gateway; the upstream target is fixed; server-side keys never reach the browser. See [architecture.md](architecture.md#9-deepseek-integration).
+
+## 10. Report contents
 
 `src/core/report/report.ts` emits:
 
@@ -250,7 +280,7 @@ Limitations:
 
 The report is only generated from the current in-memory result. If the model hash does not match the geometry hash, the UI marks the result stale and the agent re-solves before exporting.
 
-## 10. How to reproduce
+## 11. How to reproduce
 
 ```bash
 npm test
@@ -266,7 +296,7 @@ Tests cover:
 
 Browser verification scripts under `scripts/` are optional and use a locally installed Edge via Playwright Core. They are not part of the runtime and are not required to use the app.
 
-## 11. Engineering sign-off checklist
+## 12. Engineering sign-off checklist
 
 Before using a result for anything beyond a demo:
 

@@ -4,6 +4,9 @@ dist-ssr
 .npm-cache
 .vite
 .edge-profile
+.env
+.env.local
+.env.*.local
 *.local
 *.log
 .DS_Store

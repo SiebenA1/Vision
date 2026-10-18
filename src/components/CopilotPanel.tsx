@@ -2,16 +2,23 @@ import { useEffect, useRef, useState } from 'react';
 import {
   AlertTriangle,
   ArrowUp,
+  Brain,
   Check,
   Circle,
+  Cpu,
   Loader2,
   PanelRightClose,
   Paperclip,
   Send,
+  Settings2,
   Sparkles,
+  Square,
   TerminalSquare,
 } from 'lucide-react';
 import { useAppStore } from '../state/store';
+import { llmModelLabel, useLlmStore } from '../state/llmStore';
+import { stopAgent } from '../services/agent';
+import { getMaterial } from '../core/materials';
 import type { ChatMessage } from '../core/types';
 
 interface CopilotPanelProps {
@@ -49,8 +56,9 @@ function renderContent(content: string) {
   });
 }
 
-function Message({ message, onChip }: { message: ChatMessage; onChip: (text: string) => void }) {
+function Message({ message, onChip, busy }: { message: ChatMessage; onChip: (text: string) => void; busy: boolean }) {
   const isUser = message.role === 'user';
+  const source = message.meta?.source;
   if (isUser) {
     return (
       <div className="chat-message chat-message--user">
@@ -62,18 +70,34 @@ function Message({ message, onChip }: { message: ChatMessage; onChip: (text: str
     );
   }
   return (
-    <div className="chat-message chat-message--assistant">
+    <div className={`chat-message chat-message--assistant chat-message--${source ?? 'local'}`}>
       <div className="chat-message__head">
         <AgentMark size={24} />
         <div>
-          <b>ATLAS</b>
-          <small>ENGINEERING AGENT</small>
+          <b>{source === 'system' ? 'SYSTEM' : 'ATLAS'}</b>
+          <small>
+            {source === 'deepseek'
+              ? `${message.meta?.model ?? 'DEEPSEEK'} · TOOL CALLING`
+              : source === 'system'
+                ? 'SYSTEM NOTICE'
+                : 'LOCAL PLANNER · DETERMINISTIC'}
+          </small>
         </div>
         <span className="chat-message__time">
           {new Date(message.createdAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
         </span>
       </div>
       <div className="chat-message__body">
+        {message.reasoning && (
+          <details className="agent-reasoning">
+            <summary>
+              <Brain size={12} />
+              {message.streaming ? '思考中…' : '模型思考过程'}
+              <span>{message.reasoning.length.toLocaleString('en-US')} chars</span>
+            </summary>
+            <div className="agent-reasoning__body">{message.reasoning}</div>
+          </details>
+        )}
         {message.steps && message.steps.length > 0 && (
           <div className="agent-plan">
             {message.steps.map((step) => (
@@ -95,14 +119,29 @@ function Message({ message, onChip }: { message: ChatMessage; onChip: (text: str
             ))}
           </div>
         )}
-        {message.content && <div className="chat-message__content">{renderContent(message.content)}</div>}
+        {message.content && (
+          <div className={`chat-message__content ${message.streaming ? 'is-streaming' : ''}`}>
+            {renderContent(message.content)}
+            {message.streaming && <span className="stream-caret" />}
+          </div>
+        )}
         {message.meta?.chips && (
           <div className="chat-chips">
             {message.meta.chips.map((chip) => (
-              <button key={chip} type="button" onClick={() => onChip(chip)} disabled={useAppStore.getState().chatBusy}>
+              <button key={chip} type="button" onClick={() => onChip(chip)} disabled={busy}>
                 {chip}
               </button>
             ))}
+          </div>
+        )}
+        {message.usage && (
+          <div className="chat-usage">
+            <span>{message.meta?.model ?? 'DEEPSEEK'}</span>
+            <span>{message.usage.totalTokens.toLocaleString('en-US')} tokens</span>
+            {message.usage.reasoningTokens ? (
+              <span>{message.usage.reasoningTokens.toLocaleString('en-US')} think</span>
+            ) : null}
+            {message.latencyMs ? <span>{message.latencyMs} ms</span> : null}
           </div>
         )}
       </div>
@@ -113,17 +152,29 @@ function Message({ message, onChip }: { message: ChatMessage; onChip: (text: str
 const SUGGESTIONS = [
   { label: '基线校核', prompt: '运行一次基线校核，并解释最大应力出现的位置。' },
   { label: '轻量化优化', prompt: '以质量最小为目标，安全系数不低于 2.0，位移不超过 2.0 mm，优化悬臂厚度。' },
-  { label: '提高载荷', prompt: '把端部载荷提高到 1200 N，然后重新校核。' },  { label: '换成 7075', prompt: '材料换成 7075-T6，保持当前载荷，重新校核。' },
+  { label: '提高载荷', prompt: '把端部载荷提高到 1200 N，然后重新校核。' },
+  { label: '换成 7075', prompt: '材料换成 7075-T6，保持当前载荷，重新校核。' },
 ];
 
 export function CopilotPanel({ onSend }: CopilotPanelProps) {
   const chat = useAppStore((state) => state.chat);
   const busy = useAppStore((state) => state.chatBusy);
+  const agentSource = useAppStore((state) => state.agentSource);
   const copilotCollapsed = useAppStore((state) => state.copilotCollapsed);
   const toggleCopilot = useAppStore((state) => state.toggleCopilot);
   const addToast = useAppStore((state) => state.addToast);
   const model = useAppStore((state) => state.model);
   const loadMagnitude = model.loads[0]?.magnitude ?? 0;
+  const material = getMaterial(model.materialId);
+  const llmSettings = useLlmStore((state) => state.settings);
+  const serverKey = useLlmStore((state) => state.serverKey);
+  const apiKeyPresent = useLlmStore((state) => state.apiKeyPresent);
+  const llmConnectionStatus = useLlmStore((state) => state.connectionStatus);
+  const openSettings = useLlmStore((state) => state.openSettings);
+  const configured = serverKey || apiKeyPresent;
+  const llmError = configured && llmConnectionStatus === 'error';
+  const modelLabel = configured ? llmModelLabel(llmSettings) : 'LOCAL PLANNER';
+  const streamingDeepSeek = busy && agentSource === 'deepseek';
   const [draft, setDraft] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -150,6 +201,7 @@ export function CopilotPanel({ onSend }: CopilotPanelProps) {
       <button type="button" className="copilot-rail" onClick={toggleCopilot} title="展开工程智能体">
         <AgentMark size={26} />
         <span>ATLAS</span>
+        <span className={`copilot-rail__state ${configured ? 'is-live' : ''}`} />
         <span className="copilot-rail__line" />
         <span className="copilot-rail__hint">⌘K</span>
       </button>
@@ -170,32 +222,64 @@ export function CopilotPanel({ onSend }: CopilotPanelProps) {
           <AgentMark size={30} />
           <div>
             <div className="copilot__name">
-              ATLAS <span className="chip chip--live">TOOL-CALLING</span>
+              ATLAS{' '}
+              <button
+                type="button"
+                className={`agent-engine-chip ${configured ? 'is-live' : ''} ${llmError ? 'is-error' : ''}`}
+                onClick={openSettings}
+                title="配置 DeepSeek"
+              >
+                <span />
+                {configured ? (llmError ? 'DEEPSEEK ERR' : 'DEEPSEEK') : 'LOCAL'}
+              </button>
             </div>
-            <span className="copilot__sub">工程智能体 · 本地推理层</span>
+            <span className="copilot__sub">
+              {llmError
+                ? '上次调用失败 · 点击检查 API Key / 网关'
+                : configured
+                  ? `${modelLabel} · 流式工具调用${llmSettings.thinking ? ' · 思考模式' : ''}`
+                  : '确定性规划器 · 点击配置 DeepSeek'}
+            </span>
           </div>
         </div>
-        <button type="button" className="icon-button icon-button--small" onClick={toggleCopilot} title="收起智能体">
-          <PanelRightClose size={15} />
-        </button>
+        <div className="copilot__head-actions">
+          <button type="button" className="icon-button icon-button--small" onClick={openSettings} title="DeepSeek 设置">
+            <Settings2 size={15} />
+          </button>
+          <button type="button" className="icon-button icon-button--small" onClick={toggleCopilot} title="收起智能体">
+            <PanelRightClose size={15} />
+          </button>
+        </div>
       </div>
 
       <div className="copilot__context">
         <span className="context-chip">
-          <span className="context-chip__dot" /> BRK-042
+          <span className="context-chip__dot" /> {model.code}
         </span>
-        <span className="context-chip">AL 6061-T6</span>
+        <span className="context-chip">{material.shortName}</span>
         <span className="context-chip">{loadMagnitude} N</span>
-        <span className="context-chip context-chip--muted">C3D8</span>
+        <span className={`context-chip ${configured ? 'context-chip--llm' : 'context-chip--muted'}`}>
+          <Cpu size={9} /> {configured ? (llmSettings.model === 'deepseek-v4-pro' ? 'V4 PRO' : 'FLASH') : 'LOCAL'}
+        </span>
       </div>
 
       <div className="copilot__scroll" ref={scrollRef}>
         {chat.map((message) => (
-          <Message key={message.id} message={message} onChip={onSend} />
+          <Message key={message.id} message={message} onChip={onSend} busy={busy} />
         ))}
 
         {chat.length <= 1 && (
           <div className="suggestion-block">
+            {!configured && (
+              <button type="button" className="llm-setup-banner" onClick={openSettings}>
+                <span className="llm-setup-banner__icon"><Sparkles size={15} /></span>
+                <span>
+                  <b>启用 DeepSeek 大模型</b>
+                  <small>流式输出 · 思考模式 · 工具调用</small>
+                </span>
+                <ArrowUp size={12} />
+              </button>
+            )}
             <span className="eyebrow">NEXT ACTION</span>
             {SUGGESTIONS.map((suggestion) => (
               <button key={suggestion.label} type="button" onClick={() => onSend(suggestion.prompt)} disabled={busy}>
@@ -211,7 +295,7 @@ export function CopilotPanel({ onSend }: CopilotPanelProps) {
             <span />
             <span />
             <span />
-            <small>ATLAS 正在编排工具调用</small>
+            <small>{streamingDeepSeek ? 'DEEPSEEK 正在推理 / 调用工具' : 'ATLAS 正在编排工具调用'}</small>
           </div>
         )}
       </div>
@@ -219,7 +303,7 @@ export function CopilotPanel({ onSend }: CopilotPanelProps) {
       <div className="copilot__composer">
         <div className="composer-tools">
           <span className="composer-context">
-            <TerminalSquare size={12} /> CONTEXT: 模型 + 结果
+            <TerminalSquare size={12} /> {configured ? 'DEEPSEEK · STREAM + TOOLS' : 'LOCAL · CONTEXT: 模型 + 结果'}
           </span>
           <button
             type="button"
@@ -227,11 +311,11 @@ export function CopilotPanel({ onSend }: CopilotPanelProps) {
             onClick={() =>
               addToast({
                 title: '上下文附件',
-                detail: '可直接引用 STEP / STL / CSV 结果；本地解析，不上传几何。',
+                detail: '当前版本已支持模型/结果上下文；STEP / CSV 文件解析在路线图中。',
                 tone: 'neutral',
               })
             }
-            title="添加上下文"
+            title="上下文说明"
           >
             <Paperclip size={14} />
           </button>
@@ -256,12 +340,20 @@ export function CopilotPanel({ onSend }: CopilotPanelProps) {
             <span>
               <Sparkles size={12} /> 受控工具 · 可撤销
             </span>
-            <button type="button" className="send-button" onClick={submit} disabled={!draft.trim() || busy} aria-label="发送">
-              <Send size={14} />
-            </button>
+            {streamingDeepSeek ? (
+              <button type="button" className="send-button send-button--stop" onClick={stopAgent} aria-label="停止生成">
+                <Square size={11} fill="currentColor" />
+              </button>
+            ) : (
+              <button type="button" className="send-button" onClick={submit} disabled={!draft.trim() || busy} aria-label="发送">
+                <Send size={14} />
+              </button>
+            )}
           </div>
         </div>
-        <div className="composer-note">Enter 发送 · Shift+Enter 换行 · 所有数值写入前经过单位校验</div>
+        <div className="composer-note">
+          Enter 发送 · Shift+Enter 换行 · {configured ? 'DeepSeek 仅通过本地网关访问' : '配置 Key 后启用大模型规划'}
+        </div>
       </div>
     </aside>
   );

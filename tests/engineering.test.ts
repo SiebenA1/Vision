@@ -5,6 +5,7 @@ import { voxelMesh } from '../src/core/fea/mesher';
 import { solveVoxelMesh, toAnalysisResult, validateCantilever } from '../src/core/fea/solver';
 import { getMaterial } from '../src/core/materials';
 import { parseEngineeringPrompt } from '../src/core/agent/nlu';
+import { buildDeepSeekTools, directionVector } from '../src/core/llm/tools';
 
 describe('parametric geometry kernel', () => {
   it('builds a watertight bracket with positive volume', async () => {
@@ -96,5 +97,31 @@ describe('natural language intent parsing', () => {
     const load = plan.actions.find((action) => action.tool === 'set_load');
     expect(load?.args.magnitude).toBe(1200);
     expect(plan.actions.some((action) => action.tool === 'optimize')).toBe(true);
+  });
+});
+
+describe('DeepSeek tool contract', () => {
+  it('exposes the engineering tools with model-bound enums', () => {
+    const tools = buildDeepSeekTools(BRACKET_MODEL);
+    const names = tools.map((tool) => tool.function.name);
+    expect(names).toEqual(
+      expect.arrayContaining([
+        'set_variable',
+        'set_material',
+        'set_load',
+        'set_support',
+        'run_analysis',
+        'optimize',
+        'explain_risk',
+        'export_report',
+      ]),
+    );
+    const variableTool = tools.find((tool) => tool.function.name === 'set_variable')!;
+    const params = variableTool.function.parameters as {
+      properties: { key: { enum: string[] } };
+    };
+    expect(params.properties.key.enum).toContain('armThickness');
+    expect(directionVector('down')).toEqual([0, 0, -1]);
+    expect(directionVector('right')).toEqual([1, 0, 0]);
   });
 });

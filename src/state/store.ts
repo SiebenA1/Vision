@@ -60,6 +60,7 @@ interface AppState {
 
   chat: ChatMessage[];
   chatBusy: boolean;
+  agentSource: 'local' | 'deepseek' | null;
 
   history: Array<{ model: ModelDocument; label: string }>;
   future: Array<{ model: ModelDocument; label: string }>;
@@ -106,6 +107,7 @@ interface AppState {
   addMessage: (message: ChatMessage) => void;
   updateMessage: (id: string, patch: Partial<ChatMessage>) => void;
   setChatBusy: (busy: boolean) => void;
+  setAgentSource: (source: 'local' | 'deepseek' | null) => void;
 
   undo: () => void;
   redo: () => void;
@@ -185,6 +187,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
   chat: initialChat,
   chatBusy: false,
+  agentSource: null,
 
   history: [],
   future: [],
@@ -379,6 +382,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
       chat: state.chat.map((message) => (message.id === id ? { ...message, ...patch } : message)),
     })),
   setChatBusy: (chatBusy) => set({ chatBusy }),
+  setAgentSource: (agentSource) => set({ agentSource }),
 
   undo: () => {
     const state = get();
@@ -440,6 +444,8 @@ export const useAppStore = create<AppState>()((set, get) => ({
       future: [],
       viewMode: 'design',
       chat: initialChat,
+      chatBusy: false,
+      agentSource: null,
       optimization: null,
       optimizationStatus: 'idle',
       optimizationProgress: null,

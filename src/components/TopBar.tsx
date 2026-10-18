@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   ChevronDown,
+  Cpu,
   Download,
   FileText,
   GitBranch,
@@ -19,6 +20,7 @@ interface TopBarProps {
   onExportModel: () => void;
   onExportReport: () => void;
   onReset: () => void;
+  onOpenLlmSettings: () => void;
 }
 
 function Wordmark() {
@@ -44,6 +46,7 @@ export function TopBar({
   onExportModel,
   onExportReport,
   onReset,
+  onOpenLlmSettings,
 }: TopBarProps) {
   const model = useAppStore((state) => state.model);
   const history = useAppStore((state) => state.history);
@@ -136,6 +139,9 @@ export function TopBar({
               <div className="dropdown-menu__label">PROJECT</div>
               <button type="button" onClick={() => { setMenuOpen(false); onOpenAnalysis(); }}>
                 <Play size={14} /> 打开分析工作台
+              </button>
+              <button type="button" onClick={() => { setMenuOpen(false); onOpenLlmSettings(); }}>
+                <Cpu size={14} /> DeepSeek 设置
               </button>
               <button type="button" onClick={() => { setMenuOpen(false); onExportModel(); }}>
                 <Download size={14} /> 导出 STL

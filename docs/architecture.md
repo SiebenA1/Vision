@@ -2,14 +2,15 @@
 
 ## 1. Design position
 
-VISION treats language as an **intent layer**, not as an authoritative geometry kernel or solver. Every sentence is compiled into a typed `AgentAction`. The executor validates units and writes to a single model document. The model document is the source of truth; geometry, mesh, results and reports are derived artifacts with fingerprints.
+VISION treats language as an **intent layer**, not as an authoritative geometry kernel or solver. Every sentence is compiled into a typed `AgentAction`, either by DeepSeek tool calling or by the deterministic local planner. The executor validates units and writes to a single model document. The model document is the source of truth; geometry, mesh, results and reports are derived artifacts with fingerprints.
 
 This separation is deliberate:
 
-- Language is probabilistic and might be replaced by an LLM.
-- Geometry and FEA must remain deterministic and reproducible.
+- Language is probabilistic; geometry and FEA must remain deterministic.
 - A result must be invalidatable when its input model changes.
 - UI components can be loaded and disposed independently.
+- The LLM never produces numerical evidence; it only chooses validated tools and explains their results.
+- When DeepSeek is unavailable, the deterministic planner keeps the workspace operable.
 
 ## 2. Runtime layers
 
@@ -28,9 +29,9 @@ This separation is deliberate:
                │                             │
 ┌──────────────▼─────────────┐  ┌────────────▼───────────────┐
 │ Geometry pipeline          │  │ Agent pipeline             │
-│ Manifold WASM              │  │ NLU → AgentPlan            │
-│ feature evaluator          │  │ typed tools → executor     │
-│ watertight mesh + metrics  │  │ explanations / report      │
+│ Manifold WASM              │  │ DeepSeek stream + tools    │
+│ feature evaluator          │  │ or deterministic fallback  │
+│ watertight mesh + metrics  │  │ typed tools → executor     │
 └──────────────┬─────────────┘  └────────────┬───────────────┘
                │ triangle soup               │ runStudy()
 ┌──────────────▼─────────────────────────────▼───────────────┐
@@ -42,6 +43,13 @@ This separation is deliberate:
 ┌──────────────▼─────────────────────────────────────────────┐
 │ Evidence layer                                             │
 │ field projection · result cards · convergence · report      │
+└────────────────────────────────────────────────────────────┘
+                          ▲
+                          │ same-origin /api/deepseek/*
+┌─────────────────────────┴──────────────────────────────────┐
+│ Local Vite gateway                                          │
+│ fixed DeepSeek target · SSE pass-through · env key inject   │
+│ no arbitrary URL · local status endpoint                    │
 └────────────────────────────────────────────────────────────┘
 ```
 
@@ -192,7 +200,99 @@ This gives a smooth field over the original CAD geometry while remaining explici
 
 The implementation intentionally does **not** use a surrogate. Every reported candidate has a real C3D8 solve. The cost is runtime; the benefit is traceability. A future version can add a calibrated response surface behind the same interface.
 
-## 9. UI composition and lazy loading
+## 9. DeepSeek integration
+
+### 9.1 Transport
+
+The browser calls same-origin `/api/deepseek/*`. `vite.config.ts` installs a fixed-target proxy:
+
+```text
+browser → /api/deepseek/chat/completions
+        → https://api.deepseek.com/chat/completions
+```
+
+This avoids browser CORS restrictions and prevents the client from choosing an arbitrary upstream (SSRF guard). If `DEEPSEEK_API_KEY` is present in the Vite process environment, the proxy injects `Authorization` and overrides any browser credential. Otherwise the browser-supplied key is forwarded.
+
+`GET /api/llm/status` is served by a small Vite plugin and reports whether a server key exists. It never returns the key. It is available in both `vite dev` and `vite preview`.
+
+### 9.2 Models and request shape
+
+Supported model IDs follow the current DeepSeek docs:
+
+- `deepseek-flash`
+- `deepseek-v4-pro`
+
+Request body includes:
+
+```json
+{
+  "model": "deepseek-flash",
+  "messages": [],
+  "tools": [],
+  "tool_choice": "auto",
+  "stream": true,
+  "stream_options": { "include_usage": true },
+  "thinking": { "type": "enabled" },
+  "reasoning_effort": "high",
+  "temperature": 0.25,
+  "max_tokens": 8192
+}
+```
+
+Thinking mode ignores temperature by design. The UI exposes thinking on/off, effort (`low/high/max`), streaming, model, temperature, max tokens and key configuration.
+
+### 9.3 Streaming parser
+
+`src/core/llm/client.ts`:
+
+- reads `response.body` with `ReadableStreamDefaultReader`,
+- decodes UTF-8 incrementally,
+- parses `data:` SSE lines,
+- accumulates `delta.content`, `delta.reasoning_content`, and incremental `delta.tool_calls` by index,
+- merges fragmented tool names/arguments,
+- captures usage from the final chunk,
+- supports `AbortSignal` for stop generation.
+
+### 9.4 Tool loop
+
+`src/services/deepseekAgent.ts` runs up to six rounds:
+
+1. Send system + conversation + tools.
+2. Stream reasoning/content into the chat message.
+3. If tool calls arrive, append the assistant tool-call message, execute tools sequentially, append each tool result, and continue.
+4. If no tool calls remain, commit the final assistant answer.
+
+Each tool result includes a compact authoritative state snapshot: variables, material, load, support, geometry hash/mass, latest result metrics, warnings, analysis status. This lets the next model round reason about what actually changed.
+
+The tool loop is guarded by runtime validation:
+
+- JSON arguments are parsed and validated.
+- Variable keys, material IDs, faces and numeric ranges are checked.
+- Face values outside the enum are rejected.
+- Unknown tools produce an error tool message, not code execution.
+
+### 9.5 Thinking-mode reasoning replay
+
+DeepSeek's docs require that, when `tools` is present, the complete `reasoning_content` of previous assistant turns is passed back. Otherwise the API returns HTTP 400. The integration therefore maintains a module-level `deepseekHistory` containing the exact assistant/tool messages, not a display-only reconstruction. The system prompt is refreshed with current model state at each user turn; the conversation history is preserved and trimmed only at user-turn boundaries.
+
+### 9.6 Failure and fallback
+
+- No key -> local deterministic planner.
+- Gateway unreachable -> status shows offline; local planner.
+- 401/402/429/5xx/network error -> UI error, toast, then local planner fallback.
+- User stop -> `AbortSignal` cancels the request; no fallback.
+- Tool errors are returned to the model; if the turn still fails, the UI preserves the error trace.
+
+Numerical claims are always grounded in tool result JSON. The model is explicitly prohibited from inventing solver values.
+
+Official references used for the adapter:
+
+- [DeepSeek API — first call](https://api-docs.deepseek.com/)
+- [Chat Completions API](https://api-docs.deepseek.com/api/create-chat-completion)
+- [Tool Calls](https://api-docs.deepseek.com/guides/tool_calls)
+- [Thinking Mode](https://api-docs.deepseek.com/guides/thinking_mode)
+
+## 10. UI composition and lazy loading
 
 - React entry: `src/App.tsx`.
 - Main shell: top bar, tool rail, model panel, stage, copilot, result strip.
@@ -203,16 +303,20 @@ The implementation intentionally does **not** use a surrogate. Every reported ca
 
 Design system: warm paper panels, graphite viewport, signal orange for actions, lime for AI/positive states, mono for engineering numerics. No UI framework; CSS is split into tokens, base, panels, workspaces.
 
-## 10. Security / privacy
+## 11. Security / privacy
 
-- No network calls for geometry, solver, report, or agent planning.
-- Manifold WASM and fonts are bundled locally.
-- The app cannot read local files; STL/OBJ export is generated from current in-memory geometry.
-- If an LLM planner is added, it must call the same typed tools and be subject to user confirmation and audit logging. It must never send raw geometry by default.
+- Geometry, meshing, FEA, optimization, STL and report generation stay in the browser. The only optional outbound traffic is DeepSeek chat through the local gateway.
+- The DeepSeek prompts contain model variables, material/BC/load data, geometry metrics and solver summaries. They do **not** contain raw triangle arrays or the API key in chat content.
+- The gateway has a fixed upstream target; the client cannot redirect it to an arbitrary URL.
+- A server-side `DEEPSEEK_API_KEY` is never sent to the browser. Browser-entered keys stay in `sessionStorage` by default; optional `localStorage` persistence is clearly marked.
+- Tool arguments are reparsed and validated. The model cannot execute arbitrary code or write files; only the registered tool executor can mutate the model or download a generated report.
+- The app cannot read local files. STL export is generated from in-memory geometry.
+- For production deployment, terminate TLS at a reverse proxy, authenticate users, rate-limit the LLM endpoint, redact logs, and use server-side keys.
 
-## 11. Extension points
+## 12. Extension points
 
-- `Planner` interface: replace `parseEngineeringPrompt` with an LLM tool-calling adapter.
+- Add an MCP tool adapter and human-in-the-loop approval for destructive actions; the current tool schema is already typed.
+- Add a persistent, auditable LLM conversation store; current reasoning replay is in-memory per page session.
 - `MaterialSpec`: add temperature-dependent tables and allowables.
 - `mesher`: swap voxel C3D8 for tetra/shell mesher; keep `VoxelMesh`-like contract or introduce a generic `FeMesh`.
 - `solver`: assemble sparse matrix or use WASM multigrid for larger jobs.
@@ -220,17 +324,22 @@ Design system: warm paper panels, graphite viewport, signal orange for actions, 
 - `ModelDocument`: add assemblies, mates, manufacturing constraints.
 - `SceneViewport`: add picking/probing and section cuts.
 
-## 12. Performance notes
+## 13. Performance notes
 
 - Baseline solve: ~5.3k C3D8, 24k DOF, ~870 PCG iterations, ~4.5 s in Node and ~10 s in headless Edge/Software WebGL.
-- Optimization: 9 candidate FE jobs, ~90 s in headless Edge with 3 parallel workers.
+- Optimizer: 9 candidate FE jobs, ~90 s in headless Edge with 3 parallel workers.
+- DeepSeek turn latency is network/model dependent; local tool execution adds solve time. Streaming keeps the assistant responsive, but a `run_analysis` tool blocks the next model round until the solver returns.
 - Main-thread geometry rebuild: ~60–80 ms.
 - The limiting cost is PCG iterations and Worker serialisation, not rendering.
 
-## 13. Known architectural debt
+## 14. Known architectural debt
 
 - `voxelMesh` is a large synchronous Worker function; it should be streamed/progressed per slice for very large grids.
 - No cancellation token for solves; long jobs keep the worker busy.
 - `AnalysisResult` carries full fields; for many studies, fields should be stored separately or compressed.
 - Model persistence is in memory; no project save/load yet.
 - The deterministic planner has limited coverage; ambiguous prompts fall back to a capability message.
+- DeepSeek conversation history (including reasoning_content) is in memory and lost on reload; no server-side session store yet.
+- No per-user token budget or cost guard yet; settings expose per-session usage only.
+- The local Vite gateway is suitable for local development/preview. Production requires a hardened reverse proxy with auth, rate limiting and audit logs.
+- Tool calls currently execute immediately; a production system should add explicit confirmation for destructive operations (report export, large optimization runs, model reset).

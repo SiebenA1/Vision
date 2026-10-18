@@ -5,6 +5,7 @@ import './styles/tokens.css';
 import './styles/base.css';
 import './styles/panels.css';
 import './styles/workspaces.css';
+import './styles/llm.css';
 import { createRoot } from 'react-dom/client';
 import App from './App';
 
