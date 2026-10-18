@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildDeepSeekTools, directionVector } from '../src/core/llm/tools';
+import { buildDeepSeekTools, buildModelContext, directionVector } from '../src/core/llm/tools';
 import { parseEngineeringPrompt } from '../src/core/agent/nlu';
 import { isModelDocument, nextProjectCode, seedProjects } from '../src/core/projects';
 import { exportBinaryStl, parseBinaryStl } from '../src/core/cad/stl';
@@ -68,5 +68,13 @@ describe('generic modeling tool contract', () => {
     const plan = parseEngineeringPrompt('帮我建模一个 18 英寸、9辐的汽车轮辋', seedProjects()[0].model);
     expect(plan.actions).toHaveLength(0);
     expect(plan.intent).toBe('clarify');
+  });
+
+  it('gives the agent the current USD BRep script for in-place edits', () => {
+    const model = seedProjects()[0].model;
+    model.template = 'external';
+    model.externalScript = 'import usd_brep as u\nresult = u.create_box((0,0,0), 100, 20, 10)\n';
+    const context = buildModelContext(model, null, false, null, null);
+    expect((context.currentModel as { script: string | null }).script).toContain('create_box');
   });
 });

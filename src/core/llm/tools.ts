@@ -375,7 +375,14 @@ export function buildModelContext(
   geometry: { volumeCm3: number; massKg: number; bbox: number[]; triangles: number } | null,
 ): Record<string, unknown> {
   const material = getMaterial(model.materialId);
+  const script = model.externalScript ?? '';
   return {
+    cadKernel: {
+      name: 'NVIDIA USD BRep 1.0.0',
+      api: 'import usd_brep as u; assign a Brep to result',
+      units: 'mm',
+      upAxis: 'Z',
+    },
     project: {
       code: model.code,
       name: model.name,
@@ -384,6 +391,12 @@ export function buildModelContext(
       units: model.units,
       discipline: model.meta.discipline,
       designIntent: model.meta.designIntent,
+    },
+    currentModel: {
+      hasGeometry: Boolean(model.externalStlBase64),
+      script: script
+        ? `${script.slice(0, 24000)}${script.length > 24000 ? '\n# ... script truncated in context ...' : ''}`
+        : null,
     },
     material: {
       id: material.id,
