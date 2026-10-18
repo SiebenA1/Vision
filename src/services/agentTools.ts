@@ -197,7 +197,7 @@ function actionResultSummary(action: AgentAction): string {
     return `**校核结果**\n最大应力 **${fmt(result.maxVonMises, 1)} MPa**，最大位移 **${fmt(
       result.maxDisplacement,
       3,
-    )} mm**，安全系数 **${fmt(result.safetyFactor, 2)}**，质量 **${fmt(result.massKg, 3)} kg**。求解器：NVIDIA USD BRep + Gmsh + SfePy。`;
+    )} mm**，安全系数 **${fmt(result.safetyFactor, 2)}**，质量 **${fmt(result.massKg, 3)} kg**。求解器：NVIDIA USD BRep + TetGen + SfePy。`;
   }
   if (action.tool === 'set_variable') {
     return `已更新 **${action.args.label}** 至 **${action.args.value} ${action.args.unit ?? 'mm'}**，几何已重建${
@@ -329,7 +329,7 @@ export async function executeTool(action: AgentAction, lastResultRef: LastResult
     const state = useAppStore.getState();
     exportReportFile(state.model, result, state.validation);
     detail = `VISION_${state.model.code}_${result.id}.md`;
-    summary = `工程校核报告已生成并下载：**VISION_${state.model.code}_${result.id}.md**。报告包含材料与参数表、Gmsh/SfePy 结果、限制与可追溯指纹。`;
+    summary = `工程校核报告已生成并下载：**VISION_${state.model.code}_${result.id}.md**。报告包含材料与参数表、TetGen/SfePy 结果、限制与可追溯指纹。`;
   } else {
     throw new Error(`未识别的工具：${action.tool}`);
   }

@@ -2,7 +2,7 @@
 
 The backend is a **generic execution service**, not a model library. The caller
 supplies an NVIDIA USD BRep script; the worker executes it, returns exact NURBS
-B-Rep metrics and a tessellated STL. The same STL is reconstructed into a Gmsh
+B-Rep metrics and a tessellated STL. The same STL is tetrahedralized with TetGen
 volume mesh for SfePy analysis. No wheel, blade, bracket or other model preset
 is registered.
 
@@ -13,7 +13,7 @@ is registered.
 | CAD kernel | NVIDIA USD BRep 1.0.0 (`usd-brep`) | Apache-2.0 |
 | CAD worker Python | CPython 3.12 | PSF |
 | HTTP/FEA Python | CPython 3.13 | PSF |
-| Mesh | Gmsh 4.15.2 | GPL-2.0-or-later |
+| Mesh | TetGen 0.8.4 | AGPL-3.0 |
 | FEM | SfePy 2026.3 | BSD-3-Clause |
 
 The `usd-brep` wheel currently supports CPython 3.12 only. The HTTP service runs
@@ -33,14 +33,14 @@ python -m pip install usd-brep==1.0.0
 ## Run
 
 ```powershell
-$env:VISION_ENGINEERING_PORT='8109'
+$env:VISION_ENGINEERING_PORT='8111'
 python server/engineering_server.py
 ```
 
 Health:
 
 ```powershell
-curl http://127.0.0.1:8109/health
+curl http://127.0.0.1:8111/health
 ```
 
 Expected:
@@ -72,11 +72,11 @@ base64.
 ## FEA
 
 `POST /fea/solve` accepts the STL base64, material, face supports/loads and mesh
-size. It reconstructs a closed surface in Gmsh, extracts a surface loop, creates
+size. It reads the triangle PLC directly in TetGen, creates
 a C3D4 volume mesh, and runs SfePy linear elasticity.
 
 `POST /fea/validate` runs the 3D cantilever benchmark against
-`delta = PL^3 / (3EI)`. Current error: about **7.47%** at 28,625 C3D4 elements,
+`delta = PL^3 / (3EI)`. Current error: about **4.82%** at 70,404 C3D4 elements,
 within the 8% tolerance. The benchmark is computed live.
 
 ## Security

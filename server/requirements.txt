@@ -1,5 +1,6 @@
 ﻿# HTTP/FEA runtime (CPython 3.13)
 gmsh==4.15.2
+tetgen==0.8.4
 sfepy>=2026.3
 meshio
 numpy

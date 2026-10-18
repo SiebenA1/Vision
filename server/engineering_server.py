@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Any
 
 HOST = os.environ.get("VISION_ENGINEERING_HOST", "127.0.0.1")
-PORT = int(os.environ.get("VISION_ENGINEERING_PORT", "8109"))
+PORT = int(os.environ.get("VISION_ENGINEERING_PORT", "8111"))
 ROOT = Path(__file__).resolve().parent
 USD_PYTHON = Path(
     os.environ.get("VISION_USD_PYTHON", str(ROOT.parent / ".python312" / "python.exe"))
@@ -123,6 +123,12 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 versions["gmsh"] = None
             try:
+                import tetgen  # type: ignore
+
+                versions["tetgen"] = tetgen.version()
+            except Exception:
+                versions["tetgen"] = None
+            try:
                 import sfepy  # type: ignore
 
                 versions["sfepy"] = getattr(sfepy, "__version__", "unknown")
@@ -146,15 +152,15 @@ class Handler(BaseHTTPRequestHandler):
                     {"E": 210000, "nu": 0.3, "rho": 7850, "yieldStrength": 235},
                     [{"face": "x-min", "enabled": True}],
                     [{"face": "x-max", "vector": [0, 0, -1], "magnitude": 100, "enabled": True}],
-                    1.5,
+                    0.8,
                 )
                 moment = 20.0 * 10.0**3 / 12.0
                 reference = 100.0 * 100.0**3 / (3.0 * 210000.0 * moment)
                 computed = float(result["maxDisplacement"])
                 error = abs(computed - reference) / reference * 100.0
                 self._send(200, {
-                    "caseId": "cantilever-3d-usdbrep-gmsh-sfepy",
-                    "name": "3D cantilever / USD BRep + Gmsh + SfePy",
+                    "caseId": "cantilever-3d-usdbrep-tetgen-sfepy",
+                    "name": "3D cantilever / USD BRep + TetGen + SfePy",
                     "reference": reference,
                     "computed": computed,
                     "errorPercent": error,

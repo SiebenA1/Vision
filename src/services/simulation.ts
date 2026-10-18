@@ -48,7 +48,7 @@ export async function runStudy(options: RunStudyOptions = {}): Promise<AnalysisR
     return null;
   }
   if (!model.externalScript || !model.externalStlBase64) {
-    const message = '当前模型没有 USD BRep 脚本/STL，Gmsh/SfePy 需要可重放的 B-Rep 源。';
+    const message = '当前模型没有 USD BRep 脚本/STL，TetGen/SfePy 需要可重放的 B-Rep 源。';
     useAppStore.getState().setAnalysisError(message);
     useAppStore.getState().setAnalysisStatus('error');
     useAppStore.getState().addToast({ title: '无法求解', detail: message, tone: 'error' });
@@ -61,7 +61,7 @@ export async function runStudy(options: RunStudyOptions = {}): Promise<AnalysisR
   useAppStore.getState().setSolveProgress({
     phase: 'mesh',
     percent: 8,
-    detail: 'USD BRep 曲面 → Gmsh 3D 四面体网格',
+    detail: 'USD BRep 曲面 → TetGen 3D 四面体网格',
   });
   if (options.openWorkspace) useAppStore.getState().openWorkspace('analysis');
 
@@ -97,7 +97,7 @@ export async function runStudy(options: RunStudyOptions = {}): Promise<AnalysisR
       createdAt: new Date().toISOString(),
       modelRevision: model.revision,
       modelHash: currentGeometry.watermark,
-      studyName: 'Gmsh + SfePy · linear static',
+      studyName: 'USD BRep + TetGen + SfePy · linear static',
       materialId: material.id,
       loadCase: load?.name ?? 'load case 01',
       status: raw.safetyFactor >= 2 ? 'ok' : 'warning',
@@ -166,7 +166,7 @@ export async function runStudy(options: RunStudyOptions = {}): Promise<AnalysisR
     if (options.focusResult !== false && !latest.activeWorkspace) useAppStore.setState({ viewMode: 'design' });
     if (!options.silentToast) {
       useAppStore.getState().addToast({
-        title: 'Gmsh + SfePy 静力校核完成',
+        title: 'TetGen + SfePy 静力校核完成',
         detail: `σvM ${result.maxVonMises.toFixed(1)} MPa · δ ${result.maxDisplacement.toFixed(2)} mm · SF ${result.safetyFactor.toFixed(2)}`,
         tone: result.safetyFactor >= 2 ? 'success' : 'warning',
       });

@@ -441,7 +441,7 @@ export default function AnalysisWorkspace({ onClose, onRun, onRefine, onExport }
             <div className="trace-list">
               <div><span>模型指纹</span><code>{analysis?.modelHash ?? '—'}</code></div>
               <div><span>材料</span><b>{material.shortName}</b></div>
-              <div><span>求解器</span><b>NVIDIA USD BRep + Gmsh + SfePy</b></div>
+              <div><span>求解器</span><b>NVIDIA USD BRep + TetGen + SfePy</b></div>
               <div><span>时间</span><b>{analysis ? new Date(analysis.createdAt).toLocaleString('zh-CN') : '—'}</b></div>
             </div>
           </div>

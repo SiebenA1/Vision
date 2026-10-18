@@ -86,7 +86,7 @@ export function ViewportStage({ onRun, onOpenAnalysis }: ViewportStageProps) {
                   ? 'LINEAR STATIC · CONVERGED'
                   : blank
                     ? 'ADD A BASE SOLID'
-                    : 'GMSH + SFEPY'}
+                    : 'TETGEN + SFEPY'}
               </small>
             </div>
           </div>
@@ -153,7 +153,7 @@ export function ViewportStage({ onRun, onOpenAnalysis }: ViewportStageProps) {
               </span>
             </div>
             <div className="field-legend__note">
-              {resultStale ? '结果对应旧几何版本 · 请重新求解' : 'Gmsh 四面体 · SfePy 节点插值'}
+              {resultStale ? '结果对应旧几何版本 · 请重新求解' : 'TetGen 四面体 · SfePy 节点插值'}
             </div>
           </div>
         )}

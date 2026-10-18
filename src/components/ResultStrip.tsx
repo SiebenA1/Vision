@@ -55,8 +55,8 @@ export function ResultStrip({ onRun, onOpenAnalysis }: ResultStripProps) {
           </div>
         ) : (
           <div className="study-meta">
-            <span>{analysis ? `${analysis.solver.method} · ${analysis.mesh.elements.toLocaleString('en-US')} EL` : 'GMSH / SFEPY'}</span>
-            <span>{analysis ? 'GMSH + SFEPY' : 'NO RESULT'}</span>
+            <span>{analysis ? `${analysis.solver.method} · ${analysis.mesh.elements.toLocaleString('en-US')} EL` : 'TETGEN / SFEPY'}</span>
+            <span>{analysis ? 'TETGEN + SFEPY' : 'NO RESULT'}</span>
             {analysis?.convergence && <span>Δh {fmt(analysis.convergence.deltaPercent, 1)}%</span>}
           </div>
         )}

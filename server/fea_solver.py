@@ -175,60 +175,79 @@ def _clean_stl(source: Path, target: Path) -> dict[str, int]:
 
 
 def _mesh_from_stl(stl_path: Path, mesh_path: Path, mesh_size: float) -> dict[str, Any]:
-    gmsh.initialize()
-    try:
-        gmsh.option.setNumber("General.Terminal", 0)
-        gmsh.model.add("vision")
-        gmsh.merge(str(stl_path))
-        # A full-pi classification merges all facets into a handful of surfaces
-        # and can produce overlapping boundary facets on revolved/boolean B-Reps.
-        # A moderate angle keeps more surface patches separate and is robust for
-        # both boxes and wheel-like solids.
-        gmsh.model.mesh.classifySurfaces(1.0, True, True, 1.0)
-        gmsh.model.mesh.createGeometry()
-        gmsh.model.geo.synchronize()
-        surfaces = [tag for dim, tag in gmsh.model.getEntities(2)]
-        if not surfaces:
-            raise ValueError("STL did not produce any boundary surfaces")
-        loop = gmsh.model.geo.addSurfaceLoop(surfaces)
-        gmsh.model.geo.addVolume([loop])
-        gmsh.model.geo.synchronize()
-        bounds = gmsh.model.getBoundingBox(-1, -1)
-        diag = math.dist(bounds[:3], bounds[3:])
-        h = max(mesh_size, diag / 70.0)
-        gmsh.option.setNumber("Mesh.CharacteristicLengthMax", h)
-        gmsh.option.setNumber("Mesh.CharacteristicLengthMin", h * 0.55)
-        gmsh.model.mesh.generate(3)
-        node_tags, coords, _ = gmsh.model.mesh.getNodes()
-        tag_to_index = {int(tag): index for index, tag in enumerate(node_tags)}
-        vertices = nm.asarray(coords, dtype=nm.float64).reshape((-1, 3))
-        _, tet_nodes = gmsh.model.mesh.getElementsByType(4)
-        tets = nm.asarray(tet_nodes, dtype=nm.int64).reshape((-1, 4))
-        tets = nm.vectorize(tag_to_index.get)(tets)
-        _, tri_nodes = gmsh.model.mesh.getElementsByType(2)
-        tris = nm.asarray(tri_nodes, dtype=nm.int64).reshape((-1, 3))
-        tris = nm.vectorize(tag_to_index.get)(tris)
-        with mesh_path.open("w", encoding="ascii") as handle:
-            handle.write("MeshVersionFormatted 1\nDimension 3\n")
-            handle.write(f"Vertices\n{len(vertices)}\n")
-            for x, y, z in vertices:
-                handle.write(f"{x:.9f} {y:.9f} {z:.9f} 0\n")
-            handle.write(f"Tetrahedra\n{len(tets)}\n")
-            for a, b, c, d in tets:
-                handle.write(f"{a + 1} {b + 1} {c + 1} {d + 1} 0\n")
-            handle.write(f"Triangles\n{len(tris)}\n")
-            for a, b, c in tris:
-                handle.write(f"{a + 1} {b + 1} {c + 1} 0\n")
-            handle.write("End\n")
-        return {
-            "vertices": vertices,
-            "tets": tets,
-            "tris": tris,
-            "h": h,
-            "bbox": [float(v) for v in bounds],
-        }
-    finally:
-        gmsh.finalize()
+    """Tetrahedralize a cleaned STL with TetGen.
+
+    Gmsh's STL surface reparametrization rejects some valid NURBS tessellations
+    ("Wrong topology of boundary mesh for parametrization"). TetGen consumes the
+    triangle PLC directly, so it does not need to rebuild CAD surfaces first.
+    """
+    import struct
+
+    import tetgen
+
+    data = stl_path.read_bytes()
+    count = struct.unpack_from("<I", data, 80)[0]
+    vertex_index: dict[tuple[float, float, float], int] = {}
+    points: list[tuple[float, float, float]] = []
+    faces: list[tuple[int, int, int]] = []
+    for index in range(count):
+        offset = 84 + index * 50 + 12
+        values = struct.unpack_from("<9f", data, offset)
+        tri = []
+        for corner in range(3):
+            point = values[corner * 3 : corner * 3 + 3]
+            key = (round(point[0], 6), round(point[1], 6), round(point[2], 6))
+            if key not in vertex_index:
+                vertex_index[key] = len(points)
+                points.append((float(point[0]), float(point[1]), float(point[2])))
+            tri.append(vertex_index[key])
+        if len(set(tri)) == 3:
+            faces.append(tuple(tri))
+    vertices = nm.asarray(points, dtype=nm.float64)
+    triangles = nm.asarray(faces, dtype=nm.int32)
+    lo = vertices.min(axis=0)
+    hi = vertices.max(axis=0)
+    diag = float(nm.linalg.norm(hi - lo))
+    h = max(mesh_size, diag / 140.0)
+    gen = tetgen.TetGen(vertices, triangles)
+    nodes, tets, _, _ = gen.tetrahedralize(
+        switches=f"pq1.8a{max(0.01, h**3):.6f}",
+        quality=True,
+        steinerleft=200000,
+        quiet=True,
+    )
+    nodes = nm.asarray(nodes, dtype=nm.float64)
+    tets = nm.asarray(tets, dtype=nm.int64)
+    if tets.size == 0:
+        raise ValueError("TetGen produced no tetrahedra")
+    # Extract boundary triangles from tet faces occurring exactly once.
+    face_owner: dict[tuple[int, int, int], list[tuple[int, int, int]]] = {}
+    for tet in tets:
+        a, b, c, d = (int(v) for v in tet)
+        for face in ((a, b, c), (a, b, d), (a, c, d), (b, c, d)):
+            key = tuple(sorted(face))
+            face_owner.setdefault(key, []).append(face)
+    boundary = [items[0] for items in face_owner.values() if len(items) == 1]
+    tris = nm.asarray(boundary, dtype=nm.int64)
+    with mesh_path.open("w", encoding="ascii") as handle:
+        handle.write("MeshVersionFormatted 1\nDimension 3\n")
+        handle.write(f"Vertices\n{len(nodes)}\n")
+        for x, y, z in nodes:
+            handle.write(f"{x:.9f} {y:.9f} {z:.9f} 0\n")
+        handle.write(f"Tetrahedra\n{len(tets)}\n")
+        for a, b, c, d in tets:
+            handle.write(f"{a + 1} {b + 1} {c + 1} {d + 1} 0\n")
+        handle.write(f"Triangles\n{len(tris)}\n")
+        for a, b, c in tris:
+            handle.write(f"{a + 1} {b + 1} {c + 1} 0\n")
+        handle.write("End\n")
+    return {
+        "vertices": nodes,
+        "tets": tets,
+        "tris": tris,
+        "h": h,
+        "bbox": [float(lo[0]), float(lo[1]), float(lo[2]), float(hi[0]), float(hi[1]), float(hi[2])],
+    }
 
 
 def _triangle_area(points: nm.ndarray, tri: nm.ndarray) -> float:
