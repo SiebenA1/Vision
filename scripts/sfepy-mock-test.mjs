@@ -49,7 +49,9 @@ await page.waitForTimeout(700);
 await page.locator('#copilot-input').fill('用 build123d 建模 100×20×10 mm 悬臂梁，并校核。');
 await page.locator('#copilot-input').press('Enter');
 await page.waitForFunction(() => document.body.innerText.includes('CAD-8001'), null, { timeout: 60000 });
-await page.waitForTimeout(1000);
+await page.waitForTimeout(4000);
+const preRun = await page.locator('body').innerText();
+const autoRan = preRun.includes('求解中') || preRun.includes('校核完成');
 await page.getByRole('button', { name: /运行基线校核/ }).first().click();
 await page.waitForFunction(
   () => document.body.innerText.includes('校核完成') || document.body.innerText.includes('求解失败'),
@@ -67,6 +69,6 @@ await page.screenshot({ path: 'screenshots/26-sfepy-validation.png' });
 const validationText = await page.locator('body').innerText();
 const hasValidation = validationText.includes('解析解') && validationText.includes('误差');
 fs.writeFileSync('screenshots/sfepy-errors.txt', errors.join('\n'), 'utf8');
-console.log({ hasSfePy, hasResult, hasValidation });
+console.log({ hasSfePy, hasResult, hasValidation, autoRan });
 console.log('errors:', errors.join('\n') || 'none');
 await browser.close();

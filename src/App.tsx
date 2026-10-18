@@ -63,7 +63,6 @@ function Toasts() {
 
 export default function App() {
   const model = useAppStore((state) => state.model);
-  const geometry = useAppStore((state) => state.geometry);
   const activeWorkspace = useAppStore((state) => state.activeWorkspace);
   const leftCollapsed = useAppStore((state) => state.leftCollapsed);
   const toggleLeft = useAppStore((state) => state.toggleLeft);
@@ -71,7 +70,6 @@ export default function App() {
   const settingsOpen = useLlmStore((state) => state.settingsOpen);
   const closeLlmSettings = useLlmStore((state) => state.closeSettings);
   const [projectCenterOpen, setProjectCenterOpen] = useState(false);
-  const autoSolved = useRef(false);
   const firstModelEffect = useRef(true);
   const variableSignature = JSON.stringify({
     code: model.code,
@@ -125,15 +123,6 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!geometry || autoSolved.current) return;
-    autoSolved.current = true;
-    const timer = window.setTimeout(() => {
-      void runStudy({ focusResult: false, silentToast: true });
-    }, 650);
-    return () => window.clearTimeout(timer);
-  }, [geometry]);
-
-  useEffect(() => {
     const handler = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement;
       const editing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName) || target.isContentEditable;
@@ -163,9 +152,7 @@ export default function App() {
       return;
     }
     useAppStore.getState().openWorkspace('analysis');
-    if (!state.analysis && !['mesh', 'solve', 'refine'].includes(state.analysisStatus)) {
-      void runStudy({ openWorkspace: true, focusResult: true, silentToast: true });
-    } else if (state.analysis) {
+    if (state.analysis) {
       useAppStore.getState().setViewMode('result');
     }
   };
@@ -225,7 +212,6 @@ export default function App() {
     if (!window.confirm('重置为 BRK-042 示例项目？当前未导出的编辑和结果将丢失。')) return;
     useAppStore.getState().resetProject();
     resetDeepSeekConversation();
-    autoSolved.current = false;
     window.setTimeout(() => {
       void useAppStore.getState().rebuildGeometry();
     }, 50);
