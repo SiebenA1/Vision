@@ -236,6 +236,7 @@ export async function executeTool(action: AgentAction, lastResultRef: LastResult
     store.adoptExternalModel({
       name: String(action.args.name ?? 'AI B-Rep 模型'),
       code: String(action.args.code ?? `CAD-${String(Date.now()).slice(-4)}`),
+      newProject: action.args.new_project === true,
       script,
       stlBase64: result.stlBase64,
       metrics: result.metrics,

@@ -402,7 +402,13 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
   adoptExternalModel: (input) => {
     const state = get();
-    const { model, metrics } = createExternalModel(input);
+    const currentRecord = state.projects.find((project) => project.id === state.activeProjectId);
+    const createNew = input.newProject === true || !currentRecord;
+    const { model, metrics } = createExternalModel({
+      ...input,
+      code: createNew ? input.code : currentRecord.model.code,
+      name: createNew ? input.name : currentRecord.model.name,
+    });
     const geometry = parseBinaryStl(base64ToUint8(input.stlBase64), `EXT-${model.code}`);
     const geometryMetrics: GeometryMetrics = {
       ...metrics,
@@ -411,13 +417,31 @@ export const useAppStore = create<AppState>()((set, get) => ({
       watermark: geometry.watermark,
     };
     model.externalMetrics = geometryMetrics;
-    const record = makeProjectRecord(model);
-    const projects = [...state.projects, record];
-    persistProjectLibrary(projects, record.id);
+
+    let projects: typeof state.projects;
+    let activeProjectId: string;
+    if (createNew) {
+      const record = makeProjectRecord(model);
+      projects = [...state.projects, record];
+      activeProjectId = record.id;
+    } else {
+      model.id = currentRecord.model.id;
+      const updatedRecord = {
+        ...currentRecord,
+        model: structuredClone(model),
+        updatedAt: new Date().toISOString(),
+      };
+      projects = state.projects.map((project) =>
+        project.id === currentRecord.id ? updatedRecord : project,
+      );
+      activeProjectId = currentRecord.id;
+    }
+    persistProjectLibrary(projects, activeProjectId);
+
     const message: ChatMessage = {
       id: uid('msg'),
       role: 'assistant',
-      content: `已通过 **build123d / OCCT** 生成 **${model.code} · ${model.name}**。B-Rep 体积 ${(geometryMetrics.volumeCm3 / 1000).toFixed(3)} L，质量 ${geometryMetrics.massKg.toFixed(3)} kg，${geometry.triangleCount.toLocaleString('en-US')} 三角面。\n\n几何来自本次脚本，不是预设模型。`,
+      content: `${createNew ? '已创建新工程' : '已更新当前工程'} **${model.code} · ${model.name}**。B-Rep 体积 ${(geometryMetrics.volumeCm3 / 1000).toFixed(3)} L，质量 ${geometryMetrics.massKg.toFixed(3)} kg，${geometry.triangleCount.toLocaleString('en-US')} 三角面。\n\n几何来自本次脚本，不是预设模型。`,
       createdAt: Date.now(),
       meta: { kind: 'insight', source: 'local' },
     };
@@ -425,7 +449,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
       ...freshAnalysisState(),
       model,
       projects,
-      activeProjectId: record.id,
+      activeProjectId,
       geometry,
       geometryMetrics,
       selectedFeatureId: 'backend',

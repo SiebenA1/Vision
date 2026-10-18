@@ -4,6 +4,7 @@ import { createBlankProjectModel } from '../projects';
 export interface ExternalModelInput {
   name: string;
   code?: string;
+  newProject?: boolean;
   script: string;
   stlBase64: string;
   metrics: {

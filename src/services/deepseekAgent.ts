@@ -141,6 +141,7 @@ function toolAction(call: DeepSeekToolCall): AgentAction {
         script,
         name: String(args.name ?? 'AI B-Rep 模型'),
         code: String(args.code ?? ''),
+        new_project: args.new_project === true,
         density_kg_m3: asNumber(args.density_kg_m3 ?? 2700, 'density_kg_m3'),
         materialId: String(args.materialId ?? 'AL6061-T6'),
       },

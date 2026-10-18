@@ -48,7 +48,11 @@ await page.getByRole('button', { name: '保存并启用' }).click();
 await page.waitForTimeout(700);
 await page.locator('#copilot-input').fill('用 build123d 建模 100×20×10 mm 悬臂梁，并校核。');
 await page.locator('#copilot-input').press('Enter');
-await page.waitForFunction(() => document.body.innerText.includes('CAD-8001'), null, { timeout: 60000 });
+await page.waitForFunction(
+  () => document.body.innerText.includes('已更新当前工程') || document.body.innerText.includes('build123d B-Rep'),
+  null,
+  { timeout: 60000 },
+);
 await page.waitForTimeout(4000);
 const preRun = await page.locator('body').innerText();
 const autoRan = preRun.includes('求解中') || preRun.includes('校核完成');
