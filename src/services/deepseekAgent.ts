@@ -152,6 +152,21 @@ function toolAction(call: DeepSeekToolCall): AgentAction {
       label: '',
     };
   }
+  if (name === 'run_build123d') {
+    const script = String(args.script ?? '');
+    if (!script.trim()) throw new Error('build123d 脚本为空');
+    return {
+      tool: 'run_build123d',
+      args: {
+        script,
+        name: String(args.name ?? 'AI B-Rep 模型'),
+        code: String(args.code ?? ''),
+        density_kg_m3: asNumber(args.density_kg_m3 ?? 2700, 'density_kg_m3'),
+        materialId: String(args.materialId ?? 'AL6061-T6'),
+      },
+      label: '',
+    };
+  }
   if (name === 'create_wheel_rim') {
     return {
       tool: 'create_wheel_rim',

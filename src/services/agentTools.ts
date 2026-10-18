@@ -4,6 +4,7 @@ import { useAppStore } from '../state/store';
 import { runStudy, wait } from './simulation';
 import { fmt, vectorLabel } from '../lib/format';
 import { directionVector } from '../core/llm/tools';
+import { executeBuild123d } from './engineeringBackend';
 
 const FACES: FaceId[] = ['x-min', 'x-max', 'y-min', 'y-max', 'z-min', 'z-max'];
 
@@ -45,6 +46,8 @@ export function labelForAction(action: AgentAction): string {
       return '生成工程预设模型';
     case 'create_wheel_rim':
       return `生成 ${action.args.spokeCount ?? 5} 辐轮辋`;
+    case 'run_build123d':
+      return '执行 build123d / OCCT 建模脚本';
     case 'add_solid_feature':
       return `添加 ${action.args.shape ?? '实体'} 特征`;
     default:
@@ -243,6 +246,10 @@ function actionResultSummary(action: AgentAction): string {
     const model = useAppStore.getState().model;
     return `已按参数生成 **${model.code} · ${model.name}**。轮辋包含 **${model.solidFeatures?.filter((feature) => feature.id.startsWith('rim_spoke_')).length ?? 0} 根均匀辐条**、**${model.solidFeatures?.filter((feature) => feature.id.startsWith('rim_lug_')).length ?? 0} 个螺栓孔**，中心孔、轮唇与轮毂均为当前参数重建，watertight 几何已更新。`;
   }
+  if (action.tool === 'run_build123d') {
+    const model = useAppStore.getState().model;
+    return `已通过 build123d/OCCT 生成 **${model.code} · ${model.name}**。几何体积 ${(useAppStore.getState().geometryMetrics?.volumeCm3 ?? 0).toFixed(1)} cm³，质量 ${(useAppStore.getState().geometryMetrics?.massKg ?? 0).toFixed(3)} kg。`;
+  }
   if (action.tool === 'add_solid_feature') {
     const model = useAppStore.getState().model;
     return `已添加 **${action.args.shape}** 特征（${action.args.operation === 'subtract' ? '切除' : '添加'}）。当前 CSG 特征数 **${model.solidFeatures?.length ?? 0}**，几何已重建。`;
@@ -254,63 +261,21 @@ export async function executeTool(action: AgentAction, lastResultRef: LastResult
   const store = useAppStore.getState();
   let detail = '';
   let summary = '';
-  if (action.tool === 'generate_preset') {
-    const preset = String(action.args.preset ?? '');
-    if (preset === 'wind-blade') {
-      store.createWindBladeProject(true);
-    } else if (preset === 'brake-pedal') {
-      store.createBrakePedalProject(true);
-    } else {
-      throw new Error(`未知预设：${preset}`);
-    }
-    await wait(60);
-    const geometry = await useAppStore.getState().rebuildGeometry();
-    if (!geometry) throw new Error(useAppStore.getState().geometryError ?? '几何重建失败');
-    detail = `${useAppStore.getState().model.variables.length} variables · watertight`;
-    summary = actionResultSummary(action);
-    lastResultRef.value = null;
-  } else if (action.tool === 'create_wheel_rim') {
-    const spec = {
-      outerDiameterMm: Number(action.args.outerDiameterMm),
-      widthMm: Number(action.args.widthMm),
-      pcdMm: Number(action.args.pcdMm),
-      centerBoreMm: Number(action.args.centerBoreMm),
-      spokeCount: Number(action.args.spokeCount),
-      lugCount: Number(action.args.lugCount),
+  if (action.tool === 'run_build123d') {
+    const script = String(action.args.script ?? '');
+    if (!script.trim()) throw new Error('build123d 脚本为空。');
+    const density = Number(action.args.density_kg_m3 ?? 2700);
+    const result = await executeBuild123d(script, density);
+    store.adoptExternalModel({
+      name: String(action.args.name ?? 'AI B-Rep 模型'),
+      code: String(action.args.code ?? `CAD-${String(Date.now()).slice(-4)}`),
+      script,
+      stlBase64: result.stlBase64,
+      metrics: result.metrics,
       materialId: String(action.args.materialId ?? 'AL6061-T6'),
-    };
-    store.createWheelRimProject(spec, true);
-    await wait(60);
-    const geometry = await useAppStore.getState().rebuildGeometry();
-    if (!geometry) throw new Error(useAppStore.getState().geometryError ?? '轮辋几何重建失败');
-    detail = `${spec.spokeCount} spokes · ${spec.lugCount} lugs · watertight`;
-    summary = actionResultSummary(action);
-    lastResultRef.value = null;
-  } else if (action.tool === 'add_solid_feature') {
-    if ((useAppStore.getState().model.template ?? 'bracket') !== 'csg') {
-      throw new Error('当前项目不是 CSG 特征模型；请先生成 brake-pedal 预设。');
-    }
-    const shape = String(action.args.shape ?? 'box') as SolidShape;
-    if (!['box', 'cylinder', 'sphere'].includes(shape)) throw new Error(`无效实体类型：${shape}`);
-    const operation = action.args.operation === 'subtract' ? 'subtract' : 'add';
-    const numberArg = (key: string, fallback: number) => {
-      const value = Number(action.args[key]);
-      return Number.isFinite(value) ? value : fallback;
-    };
-    const axis = String(action.args.axis ?? 'z');
-    if (!['x', 'y', 'z'].includes(axis)) throw new Error(`无效圆柱轴：${axis}`);
-    store.addSolidFeature(shape, operation, {
-      position: [numberArg('x', 65), numberArg('y', 0), numberArg('z', 45)],
-      size: [numberArg('sx', 40), numberArg('sy', 30), numberArg('sz', 20)],
-      radius: numberArg('radius', 15),
-      height: numberArg('height', 40),
-      axis: axis as 'x' | 'y' | 'z',
-      rotation: [numberArg('rx', 0), numberArg('ry', 0), numberArg('rz', 0)],
     });
     await wait(40);
-    const geometry = await useAppStore.getState().rebuildGeometry();
-    if (!geometry) throw new Error(useAppStore.getState().geometryError ?? 'CSG 几何重建失败');
-    detail = `${shape} ${operation} · watertight`;
+    detail = `${result.metrics.volume_mm3.toFixed(0)} mm³ · ${result.stlBytes} STL bytes`;
     summary = actionResultSummary(action);
     lastResultRef.value = null;
   } else if (action.tool === 'set_variable') {

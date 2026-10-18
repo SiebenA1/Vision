@@ -95,211 +95,6 @@ function featureIcon(feature: FeatureDescriptor) {
   return <Plus size={12} />;
 }
 
-function BlankStarter() {
-  const addStarter = useAppStore((state) => state.initializeStarter);
-  const starters = [
-    {
-      id: 'plate' as const,
-      label: '基础板',
-      en: 'PLATE',
-      description: '矩形板 · 120 × 80 × 10 mm',
-      icon: Square,
-    },
-    {
-      id: 'block' as const,
-      label: '基础块',
-      en: 'BLOCK',
-      description: '实体块 · 100 × 80 × 60 mm',
-      icon: Box,
-    },
-    {
-      id: 'cylinder' as const,
-      label: '圆柱体',
-      en: 'CYLINDER',
-      description: '圆柱 · Ø60 × 100 mm',
-      icon: Circle,
-    },
-  ];
-  return (
-    <div className="blank-starter">
-      <div className="blank-starter__head">
-        <span className="eyebrow">BLANK PROJECT</span>
-        <h3>从基础体开始</h3>
-        <p>
-          当前项目没有几何。选择一个参数化基础体，创建后可在下方继续编辑尺寸、材料和边界条件。
-        </p>
-      </div>
-      <div className="blank-starter__grid">
-        {starters.map((starter) => {
-          const Icon = starter.icon;
-          return (
-            <button key={starter.id} type="button" onClick={() => addStarter(starter.id)}>
-              <span className="blank-starter__icon"><Icon size={18} /></span>
-              <span>
-                <b>{starter.label}</b>
-                <small>{starter.en}</small>
-              </span>
-              <em>{starter.description}</em>
-              <ChevronRight size={13} />
-            </button>
-          );
-        })}
-      </div>
-      <div className="blank-starter__note">
-        <Info size={13} />
-        <span>
-          空白工程会保留材料、单位和工程元数据，但不会提交任何几何或求解结果。当前版本尚未提供自由草图器，基础体是起点。
-        </span>
-      </div>
-    </div>
-  );
-}
-
-function CsgBuilder() {
-  const model = useAppStore((state) => state.model);
-  const selectedId = useAppStore((state) => state.selectedFeatureId);
-  const addSolidFeature = useAppStore((state) => state.addSolidFeature);
-  const updateSolidFeature = useAppStore((state) => state.updateSolidFeature);
-  const deleteSolidFeature = useAppStore((state) => state.deleteSolidFeature);
-  const features = model.solidFeatures ?? [];
-  const selected = features.find((feature) => feature.id === selectedId) ?? features[0];
-
-  const number = (value: number, patch: (next: number) => void) => (
-    <input
-      className="input"
-      type="number"
-      value={Number.isFinite(value) ? value : 0}
-      onChange={(event) => patch(Number(event.target.value) || 0)}
-    />
-  );
-
-  return (
-    <div className="csg-builder">
-      <div className="csg-builder__head">
-        <span className="eyebrow">FEATURE BUILDER / CSG</span>
-        <span className="chip">{features.length} SOLIDS</span>
-      </div>
-      <div className="csg-builder__add">
-        <button type="button" onClick={() => addSolidFeature('box', 'add')}><Plus size={11} /> 方块</button>
-        <button type="button" onClick={() => addSolidFeature('cylinder', 'add')}><Plus size={11} /> 圆柱</button>
-        <button type="button" onClick={() => addSolidFeature('sphere', 'add')}><Plus size={11} /> 球体</button>
-        <button type="button" className="is-cut" onClick={() => addSolidFeature('cylinder', 'subtract')}>
-          <Minus size={11} /> 切除
-        </button>
-      </div>
-      {selected && (
-        <div className="csg-inspector">
-          <div className="csg-inspector__title">
-            <input
-              className="input"
-              value={selected.name}
-              onChange={(event) => updateSolidFeature(selected.id, { name: event.target.value })}
-            />
-            <span className={selected.operation === 'subtract' ? 'is-cut' : ''}>
-              {selected.operation === 'subtract' ? 'CUT' : 'ADD'}
-            </span>
-          </div>
-          <div className="csg-field-group">
-            <span>POSITION</span>
-            <div className="csg-field-grid">
-              {number(selected.position[0], (value) =>
-                updateSolidFeature(selected.id, { position: [value, selected.position[1], selected.position[2]] }),
-              )}
-              {number(selected.position[1], (value) =>
-                updateSolidFeature(selected.id, { position: [selected.position[0], value, selected.position[2]] }),
-              )}
-              {number(selected.position[2], (value) =>
-                updateSolidFeature(selected.id, { position: [selected.position[0], selected.position[1], value] }),
-              )}
-            </div>
-          </div>
-          {selected.shape === 'box' && (
-            <div className="csg-field-group">
-              <span>SIZE</span>
-              <div className="csg-field-grid">
-                {number(selected.size[0], (value) =>
-                  updateSolidFeature(selected.id, { size: [value, selected.size[1], selected.size[2]] }),
-                )}
-                {number(selected.size[1], (value) =>
-                  updateSolidFeature(selected.id, { size: [selected.size[0], value, selected.size[2]] }),
-                )}
-                {number(selected.size[2], (value) =>
-                  updateSolidFeature(selected.id, { size: [selected.size[0], selected.size[1], value] }),
-                )}
-              </div>
-            </div>
-          )}
-          {selected.shape !== 'box' && (
-            <div className="csg-field-group">
-              <span>{selected.shape === 'sphere' ? 'RADIUS' : 'RADIUS / HEIGHT'}</span>
-              <div className="csg-field-grid">
-                {number(selected.radius, (value) => updateSolidFeature(selected.id, { radius: value }))}
-                {selected.shape === 'cylinder' &&
-                  number(selected.height, (value) => updateSolidFeature(selected.id, { height: value }))}
-                {selected.shape === 'cylinder' && (
-                  <select
-                    className="input"
-                    value={selected.axis}
-                    onChange={(event) =>
-                      updateSolidFeature(selected.id, { axis: event.target.value as 'x' | 'y' | 'z' })
-                    }
-                  >
-                    <option value="x">X</option>
-                    <option value="y">Y</option>
-                    <option value="z">Z</option>
-                  </select>
-                )}
-              </div>
-            </div>
-          )}
-          <div className="csg-field-group">
-            <span>ROTATION · DEG</span>
-            <div className="csg-field-grid">
-              {number(selected.rotation[0], (value) =>
-                updateSolidFeature(selected.id, { rotation: [value, selected.rotation[1], selected.rotation[2]] }),
-              )}
-              {number(selected.rotation[1], (value) =>
-                updateSolidFeature(selected.id, { rotation: [selected.rotation[0], value, selected.rotation[2]] }),
-              )}
-              {number(selected.rotation[2], (value) =>
-                updateSolidFeature(selected.id, { rotation: [selected.rotation[0], selected.rotation[1], value] }),
-              )}
-            </div>
-          </div>
-          <div className="csg-inspector__actions">
-            <button
-              type="button"
-              className={selected.operation === 'add' ? 'is-active' : ''}
-              onClick={() => updateSolidFeature(selected.id, { operation: 'add' })}
-            >
-              添加
-            </button>
-            <button
-              type="button"
-              className={selected.operation === 'subtract' ? 'is-active is-cut' : ''}
-              onClick={() => updateSolidFeature(selected.id, { operation: 'subtract' })}
-            >
-              切除
-            </button>
-            <button
-              type="button"
-              className="csg-delete"
-              onClick={() => deleteSolidFeature(selected.id)}
-              disabled={features.length <= 1}
-            >
-              <Minus size={11} /> 删除
-            </button>
-          </div>
-        </div>
-      )}
-      <div className="csg-builder__hint">
-        <Info size={12} />
-        <span>参数化 CSG：每个特征先旋转、平移，再参与布尔 union / difference。修改后会实时重建。</span>
-      </div>
-    </div>
-  );
-}
-
 function FeatureTree() {
   const model = useAppStore((state) => state.model);
   const selectedFeatureId = useAppStore((state) => state.selectedFeatureId);
@@ -502,11 +297,13 @@ export function ModelPanel() {
                 ? '版本'
                 : blank
                   ? '空白工程'
-                  : (model.template ?? 'bracket') === 'blade'
-                    ? '风电叶片'
-                    : (model.template ?? 'bracket') === 'csg'
-                      ? model.name
-                      : '参数化支架'}
+                  : (model.template ?? 'bracket') === 'external'
+                    ? 'B-Rep 模型'
+                    : (model.template ?? 'bracket') === 'blade'
+                      ? '风电叶片'
+                      : (model.template ?? 'bracket') === 'csg'
+                        ? model.name
+                        : '参数化支架'}
           </h2>
         </div>
         <div className="model-panel__head-right">
@@ -543,8 +340,24 @@ export function ModelPanel() {
                 <span>{model.meta.discipline}</span>
               </div>
             </div>
-            {(model.template ?? 'bracket') === 'csg' && <CsgBuilder />}
-            {blank ? <BlankStarter /> : <FeatureTree />}
+            {blank ? (
+              <div className="blank-starter">
+                <div className="blank-starter__head">
+                  <span className="eyebrow">BLANK PROJECT</span>
+                  <h3>通过 build123d 定义几何</h3>
+                  <p>
+                    当前没有几何，也没有任何预置模型。直接在 ATLAS 中描述零件；模型会用 build123d/OCCT
+                    脚本生成，再通过 STL 进入视口和仿真。
+                  </p>
+                </div>
+                <div className="blank-starter__note">
+                  <Info size={13} />
+                  <span>例如：“用 build123d 建模一个 18 英寸 9 辐轮辋，外径 457 mm、宽度 203 mm、PCD 114.3 mm。”</span>
+                </div>
+              </div>
+            ) : (
+              <FeatureTree />
+            )}
             {!blank && (
               <div className="geometry-readout">
                 <div className="panel-section__head">
@@ -597,7 +410,11 @@ export function ModelPanel() {
             </div>
             <div className="panel-footnote">
               <Cuboid size={13} />
-              <span>Manifold kernel · exact planar / quadric profiles · robust booleans</span>
+              <span>
+                {(model.template ?? 'bracket') === 'external'
+                  ? 'build123d · OCCT B-Rep kernel · exact BREP metrics'
+                  : 'Manifold kernel · exact planar / quadric profiles · robust booleans'}
+              </span>
             </div>
           </>
         )}

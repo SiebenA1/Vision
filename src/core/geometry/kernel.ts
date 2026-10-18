@@ -473,6 +473,9 @@ export async function buildGeometry(model: ModelDocument): Promise<{
   if (template === 'csg') {
     return buildCsgGeometry(model, started);
   }
+  if (template === 'external') {
+    throw new Error('外部 B-Rep 模型由 build123d/OCCT STL 提供，不走 Manifold 几何内核。');
+  }
   if (template === 'empty') {
     throw new Error('空白工程尚未添加基础体。');
   }

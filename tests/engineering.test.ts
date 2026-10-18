@@ -101,28 +101,10 @@ describe('natural language intent parsing', () => {
     expect(plan.actions.some((action) => action.tool === 'optimize')).toBe(true);
   });
 
-  it('maps a brake-pedal prompt to a CSG modeling preset', () => {
-    const plan = parseEngineeringPrompt('帮我建模一个刹车踏板支架', BRACKET_MODEL);
-    expect(plan.intent).toBe('modeling');
-    expect(plan.actions[0].tool).toBe('generate_preset');
-    expect(plan.actions[0].args.preset).toBe('brake-pedal');
-  });
-
-  it('maps a wind-blade prompt to the blade loft preset', () => {
-    const plan = parseEngineeringPrompt('帮我建模一个风电的扇叶', BRACKET_MODEL);
-    expect(plan.intent).toBe('modeling');
-    expect(plan.actions[0].tool).toBe('generate_preset');
-    expect(plan.actions[0].args.preset).toBe('wind-blade');
-  });
-
-  it('maps a car-rim prompt to a parameterized wheel generator', () => {
-    const plan = parseEngineeringPrompt('帮我建模一个 18 英寸、9辐的汽车轮辋：外径 457 mm，宽度 203 mm，PCD 114.3 mm，中心孔 72.6 mm，5 个螺栓孔，材料铝合金 6061-T6。', BRACKET_MODEL);
-    expect(plan.intent).toBe('modeling');
-    expect(plan.actions[0].tool).toBe('create_wheel_rim');
-    expect(plan.actions[0].args.spokeCount).toBe(9);
-    expect(plan.actions[0].args.lugCount).toBe(5);
-    expect(plan.actions[0].args.outerDiameterMm).toBe(457);
-    expect(plan.actions[0].args.widthMm).toBe(203);
+  it('does not route freeform modeling to a preset', () => {
+    const plan = parseEngineeringPrompt('帮我建模一个 18 英寸、9辐的汽车轮辋', BRACKET_MODEL);
+    expect(plan.actions).toHaveLength(0);
+    expect(plan.intent).toBe('clarify');
   });
 });
 
@@ -132,40 +114,30 @@ describe('DeepSeek tool contract', () => {
     const names = tools.map((tool) => tool.function.name);
     expect(names).toEqual(
       expect.arrayContaining([
-        'set_variable',
         'set_material',
         'set_load',
         'set_support',
         'run_analysis',
-        'optimize',
         'explain_risk',
         'export_report',
-        'generate_preset',
-        'add_solid_feature',
+        'run_build123d',
       ]),
     );
-    const variableTool = tools.find((tool) => tool.function.name === 'set_variable')!;
-    const params = variableTool.function.parameters as {
-      properties: { key: { enum: string[] } };
-    };
-    expect(params.properties.key.enum).toContain('armThickness');
     expect(directionVector('down')).toEqual([0, 0, -1]);
     expect(directionVector('right')).toEqual([1, 0, 0]);
   });
 });
 
 describe('project library', () => {
-  it('seeds six distinct engineering projects', () => {
+  it('seeds one blank build123d workspace', () => {
     const projects = seedProjects();
-    expect(projects).toHaveLength(6);
-    expect(new Set(projects.map((project) => project.model.code)).size).toBe(6);
-    expect(projects.some((project) => project.model.code === 'BRK-042-L')).toBe(true);
-    expect(projects.some((project) => project.model.code === 'PEDAL-01')).toBe(true);
-    expect(projects.some((project) => project.model.code === 'WT-01')).toBe(true);
-    expect(projects.some((project) => project.model.code === 'RIM-01')).toBe(true);
+    expect(projects).toHaveLength(1);
+    expect(projects[0].model.code).toBe('CAD-000');
+    expect(projects[0].model.template).toBe('empty');
+    expect(projects[0].model.features).toHaveLength(0);
     expect(isModelDocument(projects[0].model)).toBe(true);
     expect(isModelDocument({ schema: 'wrong' })).toBe(false);
-    expect(nextProjectCode(projects).startsWith('BRK-')).toBe(true);
+    expect(nextProjectCode(projects).startsWith('CAD-')).toBe(true);
   });
 
   it('creates blank projects and all three starter primitives', async () => {

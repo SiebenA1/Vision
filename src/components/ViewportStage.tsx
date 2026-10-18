@@ -26,7 +26,7 @@ export function ViewportStage({ onRun, onOpenAnalysis }: ViewportStageProps) {
   const toggleEdges = useAppStore((state) => state.toggleEdges);
   const toggleAnnotations = useAppStore((state) => state.toggleAnnotations);
   const resultStale = useAppStore((state) => state.resultStale);
-  const initializeStarter = useAppStore((state) => state.initializeStarter);
+
   const blank = (model.template ?? 'bracket') === 'empty';
   const meta = analysis ? fieldMeta(field, material.yieldStrength) : null;
   const fieldMin = field === 'safety' ? analysis?.safetyFactor ?? 0 : 0;
@@ -174,16 +174,9 @@ export function ViewportStage({ onRun, onOpenAnalysis }: ViewportStageProps) {
             <b>{blank ? '空白工程' : '几何体未载入'}</b>
             <span>
               {blank
-                ? '选择一个参数化基础体，开始第一次工程建模。'
+                ? '在 ATLAS 中用 build123d 描述零件，OCCT 会生成精确 B-Rep。'
                 : '运行重建以初始化参数化特征图。'}
             </span>
-            {blank && (
-              <div className="stage-empty__starters">
-                <button type="button" onClick={() => initializeStarter('plate')}>基础板</button>
-                <button type="button" onClick={() => initializeStarter('block')}>基础块</button>
-                <button type="button" onClick={() => initializeStarter('cylinder')}>圆柱体</button>
-              </div>
-            )}
           </div>
         )}
 

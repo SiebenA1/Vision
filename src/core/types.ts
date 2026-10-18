@@ -2,7 +2,7 @@ export type Vec3 = [number, number, number];
 export type Axis = 'x' | 'y' | 'z';
 export type FaceId = 'x-min' | 'x-max' | 'y-min' | 'y-max' | 'z-min' | 'z-max';
 export type UnitSystem = 'mm-N-MPa';
-export type GeometryTemplate = 'bracket' | 'plate' | 'block' | 'cylinder' | 'blade' | 'csg' | 'empty';
+export type GeometryTemplate = 'bracket' | 'plate' | 'block' | 'cylinder' | 'blade' | 'csg' | 'external' | 'empty';
 export type SolidShape = 'box' | 'cylinder' | 'sphere';
 export type SolidOperation = 'add' | 'subtract' | 'intersect';
 
@@ -100,6 +100,9 @@ export interface ModelDocument {
   variables: DesignVariable[];
   features: FeatureDescriptor[];
   solidFeatures?: SolidFeature[];
+  externalScript?: string;
+  externalStlBase64?: string;
+  externalMetrics?: GeometryMetrics;
   supports: Support[];
   loads: Load[];
   mesh: MeshSettings;
@@ -299,6 +302,7 @@ export interface AgentAction {
     | 'export_report'
     | 'generate_preset'
     | 'create_wheel_rim'
+    | 'run_build123d'
     | 'add_solid_feature'
     | 'unknown';
   args: Record<string, string | number | boolean>;

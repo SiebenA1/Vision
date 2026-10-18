@@ -30,7 +30,7 @@ export function buildDeepSeekTools(model: ModelDocument): DeepSeekTool[] {
     .map((variable) => `${variable.key} (${variable.label}, ${variable.min}-${variable.max} ${variable.unit})`)
     .join('; ');
 
-  return [
+  return ([
     {
       type: 'function',
       function: {
@@ -289,6 +289,36 @@ export function buildDeepSeekTools(model: ModelDocument): DeepSeekTool[] {
     {
       type: 'function',
       function: {
+        name: 'run_build123d',
+        description:
+          '通用 CAD 建模入口：执行一段 build123d Python 脚本，由 OCCT B-Rep 内核精确建模。脚本必须把最终 Part/Solid/Compound/BuildPart 赋给名为 result 的顶层变量。单位 mm。用于任何用户自定义几何；不要用固定预设代替用户需求。',
+        parameters: {
+          type: 'object',
+          properties: {
+            script: {
+              type: 'string',
+              description: 'Complete build123d script. Must assign `result` at top level.',
+            },
+            name: { type: 'string', description: 'Short model name.' },
+            code: { type: 'string', description: 'Optional project code.' },
+            density_kg_m3: {
+              type: 'number',
+              description: 'Uniform density used only for mass reporting.',
+            },
+            materialId: {
+              type: 'string',
+              enum: MATERIALS.map((material) => material.id),
+              description: 'VISION material id for downstream mass/FEA metadata.',
+            },
+          },
+          required: ['script'],
+          additionalProperties: false,
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
         name: 'add_solid_feature',
         description:
           '向当前 CSG 特征图追加一个实体或切除特征，并重建 watertight 几何。只能用于 CSG 模型；若不是 CSG 模型，先调用 generate_preset。坐标系为 mm，Z 向上。',
@@ -324,7 +354,12 @@ export function buildDeepSeekTools(model: ModelDocument): DeepSeekTool[] {
         },
       },
     },
-  ];
+  ] as DeepSeekTool[]).filter(
+    (tool) =>
+      !['generate_preset', 'create_wheel_rim', 'add_solid_feature', 'set_variable', 'optimize'].includes(
+        tool.function.name,
+      ),
+  );
 }
 
 export function buildModelContext(
@@ -436,17 +471,13 @@ export function buildModelContext(
         }
       : null,
     capabilities: [
-      'set_variable',
       'set_material',
       'set_load',
       'set_support',
       'run_analysis',
-      'optimize',
       'explain_risk',
       'export_report',
-      'generate_preset',
-      'create_wheel_rim',
-      'add_solid_feature',
+      'run_build123d',
     ],
   };
 }

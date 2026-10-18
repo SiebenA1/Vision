@@ -241,15 +241,6 @@ function wheelRimPlan(text: string): AgentPlan {
 
 export function parseEngineeringPrompt(prompt: string, model: ModelDocument): AgentPlan {
   const text = normalize(prompt);
-  if (/(轮辋|轮毂|wheel\s*rim|rim|wheel)/.test(text) && !/(方向盘|steering\s*wheel)/.test(text)) {
-    return wheelRimPlan(text);
-  }
-  if (/(风电|风机|风力|wind).*(叶片|扇叶|blade)|(叶片|扇叶).*(风电|风机)|(风电|风机).*(blade)/.test(text)) {
-    return windBladePlan();
-  }
-  if (/(刹车|制动|brake).*(踏板|pedal)|(踏板|pedal).*(支架|bracket)|(刹车|制动).*(支架|bracket)/.test(text)) {
-    return brakePedalPlan();
-  }
   const actions: AgentAction[] = [];
 
   const materialId = findMaterial(text);

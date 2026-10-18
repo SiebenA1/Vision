@@ -9,26 +9,27 @@ import type {
   ModelDocument,
   OptimizationResult,
   ProjectRecord,
-  SolidFeature,
-  SolidShape,
   ToastMessage,
   ValidationResult,
-  WheelRimSpec,
   WorkspaceId,
 } from '../core/types';
 import type { SolveProgress } from '../core/fea/client';
-import { BRACKET_MODEL, cloneModel } from '../core/presets';
 import {
+  createBlankProjectModel,
   isModelDocument,
   loadProjectLibrary,
   makeProjectRecord,
   nextProjectCode,
   persistProjectLibrary,
 } from '../core/projects';
-import { createBlankModel, createStarterModel, createBrakePedalModel, createWindBladeModel, createWheelRimModel, csgFeatures } from '../core/templates';
+import { base64ToUint8, parseBinaryStl } from '../core/cad/stl';
+import { createExternalModel, type ExternalModelInput } from '../core/cad/external';
 import { getMaterial, massFromVolume, type MaterialSpec } from '../core/materials';
-import { buildGeometry } from '../core/geometry/kernel';
 import type { OptimizerProgress } from '../core/optimization/optimizer';
+
+function cloneModel<T>(value: T): T {
+  return structuredClone(value);
+}
 
 export type AnalysisStatus = 'idle' | 'queued' | 'mesh' | 'solve' | 'refine' | 'ready' | 'error';
 export type OverlayWorkspace = 'analysis' | 'optimize' | null;
@@ -94,17 +95,7 @@ interface AppState {
   switchProject: (id: string, preserveChat?: boolean) => void;
   createProject: (name: string, code: string) => boolean;
   createBlankProject: (name: string, code: string) => boolean;
-  createBrakePedalProject: (preserveChat?: boolean) => void;
-  createWindBladeProject: (preserveChat?: boolean) => void;
-  createWheelRimProject: (spec?: Partial<WheelRimSpec>, preserveChat?: boolean) => void;
-  initializeStarter: (template: 'plate' | 'block' | 'cylinder') => void;
-  addSolidFeature: (
-    shape: SolidShape,
-    operation: 'add' | 'subtract',
-    overrides?: Partial<Omit<SolidFeature, 'id' | 'shape' | 'operation'>>,
-  ) => void;
-  updateSolidFeature: (id: string, patch: Partial<SolidFeature>) => void;
-  deleteSolidFeature: (id: string) => void;
+  adoptExternalModel: (input: ExternalModelInput) => void;
   duplicateProject: (id: string) => void;
   deleteProject: (id: string) => void;
   renameProject: (id: string, name: string, code: string) => void;
@@ -182,24 +173,13 @@ const initialProject =
 const initialModel = cloneModel(initialProject.model);
 
 function chatSeedFor(model: ModelDocument): ChatMessage[] {
-  const template = model.template ?? 'bracket';
-  const blank = template === 'empty';
-  const starter = template === 'plate' || template === 'block' || template === 'cylinder';
-  const csg = template === 'csg';
-  const blade = template === 'blade';
-  const wheel = csg && /轮辋|轮毂|rim/i.test(model.name);
-  const solidCount = model.solidFeatures?.length ?? 0;
-  const content = blank
-    ? `${model.code} · ${model.name} 空白工程已创建。当前没有几何体。\n\n请在左侧选择 **基础板 / 基础块 / 圆柱体**，设置材料、边界条件与载荷，然后运行第一次静力校核。`
-    : wheel
-      ? `${model.code} · ${model.name} 已按参数实时生成。轮辋包含 **${solidCount} 个 CSG 特征**，辐条数量、外径、宽度、PCD、中心孔与螺栓孔均来自本次规格。\n\n可运行基线校核，或在 FEATURE BUILDER 中继续修改。`
-      : csg
-        ? `${model.code} · ${model.name} 已载入。CSG 特征图包含 **${solidCount} 个实体/切除特征**，材料 ${getMaterial(model.materialId).shortName}，固定 ${model.supports[0]?.face ?? '—'}，载荷 ${model.loads[0]?.face ?? '—'} · ${model.loads[0]?.magnitude ?? 0} N。\n\n可运行基线校核、追问危险区域，或继续叠加特征。`
-        : blade
-          ? `${model.code} · ${model.name} 已载入。**NACA 翼型 8 截面放样**，弦长与扭角沿展向变化，叶根固定、叶尖 ${model.loads[0]?.magnitude ?? 0} N 等效载荷。\n\n下一步：运行基线校核，或调整叶片长度、弦长、扭角和厚度比。`
-          : starter
-            ? `${model.code} · ${model.name} 已载入。基础体 ${model.variables.map((variable) => `${variable.label} ${variable.value} mm`).join(' · ')}；材料 ${getMaterial(model.materialId).shortName}，顶面载荷 ${model.loads[0]?.magnitude ?? 0} N。\n\n下一步：运行基线校核，或继续在参数面板中调整几何。`
-            : `${model.code} · ${model.name} 已载入。${model.variables.length} 个参数化变量、${getMaterial(model.materialId).shortName} 材料与 ${model.loads[0]?.magnitude ?? 0} N 端载边界条件已同步。\n\n我建议先做一次基线校核，再以质量最小为目标搜索悬臂厚度。你也可以直接用自然语言改变几何、载荷或材料。`;
+  const external = model.template === 'external';
+  const content =
+    model.template === 'empty'
+      ? `${model.code} · ${model.name} 空白工程已创建。当前没有几何体。\n\n直接在 ATLAS 中用 build123d 描述零件；模型会由 OCCT B-Rep 内核执行并生成精确几何。没有预置模型。`
+      : external
+        ? `${model.code} · ${model.name} 已通过 build123d/OCCT 生成。几何来自本次脚本，不是预设模型。\n\n可运行基线校核，或继续描述要修改的几何。`
+        : `${model.code} · ${model.name} 已载入。`;
   return [
     {
       id: `msg_seed_${Date.now().toString(36)}`,
@@ -208,7 +188,7 @@ function chatSeedFor(model: ModelDocument): ChatMessage[] {
       createdAt: Date.now() - 42_000,
       meta: {
         kind: 'insight',
-        chips: blank ? [] : wheel ? ['基线校核', '哪里最危险？', '检查辐条根部'] : blade ? ['基线校核', '哪里最危险？', '分析叶根'] : csg ? ['应力集中在哪？', '检查结构风险', '继续加特征'] : ['基线校核', '轻量化优化', '哪里最危险？'],
+        chips: model.template === 'empty' ? [] : ['运行基线校核', '哪里最危险？', '生成工程校核报告'],
       },
     },
   ];
@@ -307,6 +287,45 @@ export const useAppStore = create<AppState>()((set, get) => ({
   rebuildGeometry: async () => {
     const model = get().model;
     const seq = get().buildSeq + 1;
+    if (model.template === 'external') {
+      if (!model.externalStlBase64) {
+        set({
+          buildSeq: seq,
+          building: false,
+          geometryError: '外部 B-Rep 模型缺少 STL 数据，请重新执行 build123d 脚本。',
+        });
+        return null;
+      }
+      try {
+        const geometry = parseBinaryStl(base64ToUint8(model.externalStlBase64), `EXT-${model.code}`);
+        const stored = model.externalMetrics;
+        const metrics: GeometryMetrics = {
+          volumeCm3: stored?.volumeCm3 ?? geometry.volumeMm3 / 1000,
+          massKg: stored?.massKg ?? massFromVolume(geometry.volumeMm3, getMaterial(model.materialId).rho),
+          surfaceCm2: stored?.surfaceCm2 ?? geometry.areaMm2 / 100,
+          bbox: geometry.bbox,
+          triangleCount: geometry.triangleCount,
+          buildMs: 0,
+          watermark: geometry.watermark,
+        };
+        set({
+          buildSeq: seq,
+          geometry,
+          geometryMetrics: metrics,
+          geometryError: null,
+          building: false,
+          resultStale: Boolean(get().analysis),
+        });
+        return geometry;
+      } catch (error) {
+        set({
+          buildSeq: seq,
+          building: false,
+          geometryError: error instanceof Error ? error.message : String(error),
+        });
+        return null;
+      }
+    }
     if ((model.template ?? 'bracket') === 'empty') {
       set({
         buildSeq: seq,
@@ -319,26 +338,12 @@ export const useAppStore = create<AppState>()((set, get) => ({
       });
       return null;
     }
-    set({ buildSeq: seq, building: true, geometryError: null });
-    try {
-      const { geometry, featureLog } = await buildGeometry(model);
-      if (get().buildSeq !== seq) return geometry;
-      set((state) => ({
-        geometry,
-        geometryMetrics: metricsFor(model, geometry),
-        featureLog,
-        building: false,
-        resultStale: state.analysis ? state.analysis.modelHash !== geometry.watermark : false,
-      }));
-      return geometry;
-    } catch (error) {
-      if (get().buildSeq !== seq) return null;
-      set({
-        building: false,
-        geometryError: error instanceof Error ? error.message : String(error),
-      });
-      return null;
-    }
+    set({
+      buildSeq: seq,
+      building: false,
+      geometryError: '不支持的几何模板；几何必须由 build123d/OCCT 后端生成。',
+    });
+    return null;
   },
 
   syncProject: () => {
@@ -417,147 +422,44 @@ export const useAppStore = create<AppState>()((set, get) => ({
       get().addToast({ title: '项目编号已存在', detail: cleanCode, tone: 'warning' });
       return false;
     }
-    const model = createBlankModel(cleanName, cleanCode);
+    const model = createBlankProjectModel(cleanCode, cleanName);
     const record = makeProjectRecord(model);
     set({ projects: [...state.projects, record] });
     get().switchProject(record.id);
     return true;
   },
 
-  initializeStarter: (template) => {
+  adoptExternalModel: (input) => {
     const state = get();
-    const model = createStarterModel(template, state.model);
-    const projects = state.projects.map((project) =>
-      project.id === state.activeProjectId
-        ? { ...project, model: cloneModel(model), updatedAt: new Date().toISOString() }
-        : project,
-    );
-    const starterLabel = template === 'plate' ? '基础板' : template === 'block' ? '基础块' : '圆柱体';
-    const systemMessage: ChatMessage = {
+    const { model, metrics } = createExternalModel(input);
+    const geometry = parseBinaryStl(base64ToUint8(input.stlBase64), `EXT-${model.code}`);
+    const geometryMetrics: GeometryMetrics = {
+      ...metrics,
+      bbox: geometry.bbox,
+      triangleCount: geometry.triangleCount,
+      watermark: geometry.watermark,
+    };
+    model.externalMetrics = geometryMetrics;
+    const record = makeProjectRecord(model);
+    const projects = [...state.projects, record];
+    persistProjectLibrary(projects, record.id);
+    const message: ChatMessage = {
       id: uid('msg'),
       role: 'assistant',
-      content: `已添加 **${starterLabel}**。${model.variables.map((variable) => `${variable.label} ${variable.value} mm`).join(' · ')}。\n\n可运行基线校核，或继续修改参数。`,
+      content: `已通过 **build123d / OCCT** 生成 **${model.code} · ${model.name}**。B-Rep 体积 ${(geometryMetrics.volumeCm3 / 1000).toFixed(3)} L，质量 ${geometryMetrics.massKg.toFixed(3)} kg，${geometry.triangleCount.toLocaleString('en-US')} 三角面。\n\n几何来自本次脚本，不是预设模型。`,
       createdAt: Date.now(),
-      meta: { kind: 'insight', source: 'system' },
+      meta: { kind: 'insight', source: 'local' },
     };
     set({
       ...freshAnalysisState(),
       model,
       projects,
-      activeProjectId: state.activeProjectId,
-      selectedFeatureId: 'base',
-      selectedVariableKey: model.variables[0]?.key ?? 'length',
-      chat: [...state.chat, systemMessage],
-    });
-    persistProjectLibrary(projects, state.activeProjectId);
-    window.setTimeout(() => {
-      void get().rebuildGeometry();
-    }, 0);
-  },
-
-  createBrakePedalProject: (preserveChat = false) => {
-    const state = get();
-    let index = 1;
-    const codes = new Set(state.projects.map((project) => project.model.code));
-    while (codes.has(`PEDAL-${String(index).padStart(2, '0')}`)) index += 1;
-    const code = `PEDAL-${String(index).padStart(2, '0')}`;
-    const model = createBrakePedalModel(code, '刹车踏板支架');
-    const record = makeProjectRecord(model);
-    set({ projects: [...state.projects, record] });
-    get().switchProject(record.id, preserveChat);
-  },
-
-  createWindBladeProject: (preserveChat = false) => {
-    const state = get();
-    let index = 1;
-    const codes = new Set(state.projects.map((project) => project.model.code));
-    while (codes.has(`WT-${String(index).padStart(2, '0')}`)) index += 1;
-    const code = `WT-${String(index).padStart(2, '0')}`;
-    const model = createWindBladeModel(code, '风电叶片');
-    const record = makeProjectRecord(model);
-    set({ projects: [...state.projects, record] });
-    get().switchProject(record.id, preserveChat);
-  },
-
-  createWheelRimProject: (spec, preserveChat = false) => {
-    const state = get();
-    let index = 1;
-    const codes = new Set(state.projects.map((project) => project.model.code));
-    while (codes.has(`RIM-${String(index).padStart(2, '0')}`)) index += 1;
-    const code = `RIM-${String(index).padStart(2, '0')}`;
-    const spokeCount = Math.min(20, Math.max(3, Math.round(spec?.spokeCount ?? 5)));
-    const inches = Math.round(((spec?.outerDiameterMm ?? 457) / 25.4) * 10) / 10;
-    const name = `${inches} 英寸 ${spokeCount} 辐汽车轮辋`;
-    const model = createWheelRimModel(code, name, spec);
-    const record = makeProjectRecord(model);
-    set({ projects: [...state.projects, record] });
-    get().switchProject(record.id, preserveChat);
-  },
-
-  addSolidFeature: (shape, operation, overrides) => {
-    const state = get();
-    if ((state.model.template ?? 'bracket') !== 'csg') return;
-    const current = state.model.solidFeatures ?? [];
-    const index = current.length + 1;
-    const shapeName = shape === 'box' ? '方块' : shape === 'cylinder' ? '圆柱' : '球体';
-    const feature: SolidFeature = {
-      id: `sf_${Date.now().toString(36)}_${index}`,
-      name: `${operation === 'subtract' ? '切除' : ''}${shapeName} ${index}`,
-      shape,
-      operation,
-      enabled: true,
-      position: [65, 0, 45],
-      rotation: [0, 0, 0],
-      size: [40, 30, 20],
-      radius: shape === 'sphere' ? 18 : 15,
-      height: 40,
-      axis: 'z',
-      ...overrides,
-    };
-    const solidFeatures = [...current, feature];
-    const model = cloneModel(state.model);
-    model.solidFeatures = solidFeatures;
-    model.features = csgFeatures(solidFeatures);
-    state.history.push({ model: cloneModel(state.model), label: `${feature.name} · ${operation === 'subtract' ? '切除' : '添加'}` });
-    set({
-      model,
-      history: [...state.history],
-      future: [],
-      selectedFeatureId: feature.id,
-    });
-  },
-
-  updateSolidFeature: (id, patch) => {
-    const state = get();
-    const current = state.model.solidFeatures ?? [];
-    if (!current.some((feature) => feature.id === id)) return;
-    const solidFeatures = current.map((feature) =>
-      feature.id === id ? { ...feature, ...patch, id: feature.id } : feature,
-    );
-    const model = cloneModel(state.model);
-    model.solidFeatures = solidFeatures;
-    model.features = csgFeatures(solidFeatures);
-    set({ model, selectedFeatureId: id });
-  },
-
-  deleteSolidFeature: (id) => {
-    const state = get();
-    const current = state.model.solidFeatures ?? [];
-    if (current.length <= 1) {
-      get().addToast({ title: '至少保留一个 CSG 特征', tone: 'warning' });
-      return;
-    }
-    const solidFeatures = current.filter((feature) => feature.id !== id);
-    const model = cloneModel(state.model);
-    model.solidFeatures = solidFeatures;
-    model.features = csgFeatures(solidFeatures);
-    state.history.push({ model: cloneModel(state.model), label: '删除 CSG 特征' });
-    set({
-      model,
-      history: [...state.history],
-      future: [],
-      selectedFeatureId:
-        state.selectedFeatureId === id ? solidFeatures[0]?.id ?? '' : state.selectedFeatureId,
+      activeProjectId: record.id,
+      geometry,
+      geometryMetrics,
+      selectedFeatureId: 'backend',
+      selectedVariableKey: '',
+      chat: [...state.chat, message],
     });
   },
 
@@ -852,7 +754,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
   resetProject: () => {
     const state = get();
-    const model = cloneModel(BRACKET_MODEL);
+    const model = createBlankProjectModel(state.model.code, state.model.name);
     const projects = state.projects.map((project) =>
       project.id === state.activeProjectId
         ? { ...project, model: cloneModel(model), updatedAt: new Date().toISOString() }
@@ -862,16 +764,13 @@ export const useAppStore = create<AppState>()((set, get) => ({
       ...freshAnalysisState(),
       model,
       projects,
-      selectedFeatureId: 'arm',
-      selectedVariableKey: 'armThickness',
+      selectedFeatureId: '',
+      selectedVariableKey: '',
       chat: chatSeedFor(model),
       chatBusy: false,
       agentSource: null,
     });
     persistProjectLibrary(projects, state.activeProjectId);
-    window.setTimeout(() => {
-      void get().rebuildGeometry();
-    }, 0);
   },
 }));
 

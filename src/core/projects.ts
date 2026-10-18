@@ -1,9 +1,7 @@
 import type { ModelDocument, ProjectRecord } from './types';
-import { BRACKET_MODEL, cloneModel } from './presets';
-import { createBrakePedalModel, createWindBladeModel, createWheelRimModel } from './templates';
 
-const STORAGE_KEY = 'vision.project.library.v1';
-const ACTIVE_KEY = 'vision.project.active.v1';
+const STORAGE_KEY = 'vision.project.library.v2';
+const ACTIVE_KEY = 'vision.project.active.v2';
 
 function isoNow(): string {
   return new Date().toISOString();
@@ -12,7 +10,7 @@ function isoNow(): string {
 function cloneRecord(record: ProjectRecord): ProjectRecord {
   return {
     ...record,
-    model: cloneModel(record.model),
+    model: structuredClone(record.model),
   };
 }
 
@@ -44,96 +42,71 @@ export function isProjectRecord(value: unknown): value is ProjectRecord {
   );
 }
 
-function heavyProject(): ProjectRecord {
-  const model = cloneModel(BRACKET_MODEL);
-  model.id = 'mdl_brk_042_l';
-  model.code = 'BRK-042-L';
-  model.name = '重载悬挂支架';
-  model.revision = 'R02';
-  model.subtitle = 'Heavy-duty cantilever variant';
-  model.materialId = 'AL7075-T6';
-  model.meta.designIntent = '在 1,200 N 端载下保持安全系数 ≥ 2.0，优先保证螺栓连接与根部强度。';
-  const set = (key: string, value: number) => {
-    const variable = model.variables.find((item) => item.key === key);
-    if (variable) variable.value = value;
-  };
-  set('armThickness', 16);
-  set('wallThickness', 12);
-  set('armWidth', 54);
-  if (model.loads[0]) {
-    model.loads[0].magnitude = 1200;
-    model.loads[0].description = '重载工况 · 1,200 N 端部竖向载荷';
-  }
+/**
+ * A blank project is the only built-in project. Geometry must come from the
+ * generic build123d/OCCT backend; there are no model presets.
+ */
+export function createBlankProjectModel(code = 'CAD-000', name = '空白工程'): ModelDocument {
+  const now = isoNow();
   return {
-    id: 'prj_brk_042_l',
-    model,
-    createdAt: '2026-10-12T09:20:00.000Z',
-    updatedAt: '2026-10-18T05:00:00.000Z',
-  };
-}
-
-function lightweightProject(): ProjectRecord {
-  const model = cloneModel(BRACKET_MODEL);
-  model.id = 'mdl_brk_042_s';
-  model.code = 'BRK-042-S';
-  model.name = '轻量化支架';
-  model.revision = 'R03';
-  model.subtitle = 'Mass-minimized cantilever variant';
-  model.meta.designIntent = '以 SF ≥ 2.0、δmax ≤ 2.0 mm 为约束，探索悬臂厚度与减重孔的质量收益。';
-  const set = (key: string, value: number) => {
-    const variable = model.variables.find((item) => item.key === key);
-    if (variable) variable.value = value;
-  };
-  set('armThickness', 9);
-  set('lighteningHoleDia', 24);
-  return {
-    id: 'prj_brk_042_s',
-    model,
-    createdAt: '2026-10-15T11:40:00.000Z',
-    updatedAt: '2026-10-18T05:10:00.000Z',
-  };
-}
-
-function brakePedalProject(): ProjectRecord {
-  return {
-    id: 'prj_pedal_01',
-    model: createBrakePedalModel('PEDAL-01', '刹车踏板支架'),
-    createdAt: '2026-10-16T08:30:00.000Z',
-    updatedAt: '2026-10-18T05:20:00.000Z',
-  };
-}
-
-function windBladeProject(): ProjectRecord {
-  return {
-    id: 'prj_wind_blade_01',
-    model: createWindBladeModel('WT-01', '风电叶片'),
-    createdAt: '2026-10-17T06:10:00.000Z',
-    updatedAt: '2026-10-18T05:30:00.000Z',
-  };
-}
-
-function wheelRimProject(): ProjectRecord {
-  return {
-    id: 'prj_wheel_rim_01',
-    model: createWheelRimModel('RIM-01', '汽车轮辋'),
-    createdAt: '2026-10-17T09:40:00.000Z',
-    updatedAt: '2026-10-18T05:40:00.000Z',
+    schema: 'vision.model/1',
+    id: `mdl_${Date.now().toString(36)}`,
+    code,
+    name,
+    subtitle: 'Blank build123d / OCCT workspace',
+    revision: 'R01',
+    template: 'empty',
+    units: 'mm-N-MPa',
+    materialId: 'AL6061-T6',
+    variables: [],
+    features: [],
+    supports: [
+      {
+        id: 'sup_blank',
+        name: '未定义约束',
+        face: 'x-min',
+        type: 'fixed',
+        enabled: true,
+      },
+    ],
+    loads: [
+      {
+        id: 'load_blank',
+        name: '未定义载荷',
+        face: 'x-max',
+        vector: [0, 0, -1],
+        magnitude: 1000,
+        enabled: true,
+        description: '空白工程占位载荷；分析前必须按实际工况修改。',
+      },
+    ],
+    mesh: {
+      targetElements: 7000,
+      cellSizeMm: 4,
+      elementType: 'C3D8',
+      tolerance: 1e-4,
+      maxIterations: 2400,
+      boundaryPolicy: 'conservative-voxel',
+    },
+    meta: {
+      client: 'VISION Engineering',
+      discipline: '结构 · 静力',
+      created: now.slice(0, 10),
+      analyst: 'ATLAS / 工程智能体',
+      designIntent: '空白工程：通过 build123d/OCCT 脚本定义几何、载荷和约束。没有预置模型。',
+    },
   };
 }
 
 export function seedProjects(): ProjectRecord[] {
+  const model = createBlankProjectModel();
   return [
     {
-      id: 'prj_brk_042',
-      model: cloneModel(BRACKET_MODEL),
-      createdAt: '2026-10-10T08:00:00.000Z',
+      id: 'prj_blank',
+      model,
+      createdAt: isoNow(),
       updatedAt: isoNow(),
     },
-    heavyProject(),
-    lightweightProject(),
-    brakePedalProject(),
-    windBladeProject(),
-    wheelRimProject(),
   ];
 }
 
@@ -153,15 +126,6 @@ export function loadProjectLibrary(): ProjectLibraryState {
     const parsed = JSON.parse(raw) as unknown;
     const projects = Array.isArray(parsed) ? parsed.filter(isProjectRecord).map(cloneRecord) : [];
     if (projects.length === 0) return { projects: fallback, activeProjectId: fallback[0].id };
-    if (!projects.some((project) => project.model.code === 'PEDAL-01')) {
-      projects.push(brakePedalProject());
-    }
-    if (!projects.some((project) => project.model.code === 'WT-01')) {
-      projects.push(windBladeProject());
-    }
-    if (!projects.some((project) => project.model.code === 'RIM-01')) {
-      projects.push(wheelRimProject());
-    }
     const storedActive = localStorage.getItem(ACTIVE_KEY);
     const activeProjectId = projects.some((project) => project.id === storedActive)
       ? String(storedActive)
@@ -178,12 +142,12 @@ export function persistProjectLibrary(projects: ProjectRecord[], activeProjectId
     localStorage.setItem(STORAGE_KEY, JSON.stringify(projects));
     localStorage.setItem(ACTIVE_KEY, activeProjectId);
   } catch {
-    // Local persistence is best-effort.
+    // Local persistence is best-effort; STL payloads can be large.
   }
 }
 
-export function nextProjectCode(projects: ProjectRecord[], prefix = 'BRK'): string {
-  let index = 43;
+export function nextProjectCode(projects: ProjectRecord[], prefix = 'CAD'): string {
+  let index = 1;
   const used = new Set(projects.map((project) => project.model.code));
   while (used.has(`${prefix}-${String(index).padStart(3, '0')}`)) index += 1;
   return `${prefix}-${String(index).padStart(3, '0')}`;
@@ -193,7 +157,7 @@ export function makeProjectRecord(model: ModelDocument): ProjectRecord {
   const now = isoNow();
   return {
     id: `prj_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 5)}`,
-    model: cloneModel(model),
+    model: structuredClone(model),
     createdAt: now,
     updatedAt: now,
   };
