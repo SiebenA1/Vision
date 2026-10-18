@@ -87,16 +87,16 @@ function fieldValues(result: AnalysisResult, field: FieldKind, yieldStrength: nu
 }
 
 interface NodeHash {
-  map: Map<string, number[]>;
+  map: Map<number, number[]>;
   cell: number;
 }
 
-function hashKey(x: number, y: number, z: number): string {
-  return `${x}|${y}|${z}`;
+function hashKey(x: number, y: number, z: number): number {
+  return (x * 73856093) ^ (y * 19349663) ^ (z * 83492791);
 }
 
 function buildNodeHash(result: AnalysisResult, cell: number): NodeHash {
-  const map = new Map<string, number[]>();
+  const map = new Map<number, number[]>();
   for (let i = 0; i < result.field.nodeCount; i += 1) {
     const x = Math.floor(result.field.positions[i * 3] / cell);
     const y = Math.floor(result.field.positions[i * 3 + 1] / cell);
@@ -168,44 +168,13 @@ export function projectField(
       }
     }
     if (nearest >= 0) {
-      let weightSum = 0;
-      let valueSum = 0;
-      let ux = 0;
-      let uy = 0;
-      let uz = 0;
-      const radius = hash.cell * 1.75;
-      for (let iz = cz - 2; iz <= cz + 2; iz += 1) {
-        for (let iy = cy - 2; iy <= cy + 2; iy += 1) {
-          for (let ix = cx - 2; ix <= cx + 2; ix += 1) {
-            const list = hash.map.get(hashKey(ix, iy, iz));
-            if (!list) continue;
-            for (const node of list) {
-              const nx = result.field.positions[node * 3];
-              const ny = result.field.positions[node * 3 + 1];
-              const nz = result.field.positions[node * 3 + 2];
-              const dist = Math.hypot(px - nx, py - ny, pz - nz);
-              if (dist > radius) continue;
-              const weight = 1 / (dist + 0.35);
-              weightSum += weight;
-              valueSum += values[node] * weight;
-              ux += displacement[node * 3] * weight;
-              uy += displacement[node * 3 + 1] * weight;
-              uz += displacement[node * 3 + 2] * weight;
-            }
-          }
-        }
-      }
-      if (weightSum > 0) {
-        valueSum /= weightSum;
-        ux /= weightSum;
-        uy /= weightSum;
-        uz /= weightSum;
-      } else {
-        valueSum = values[nearest];
-        ux = displacement[nearest * 3];
-        uy = displacement[nearest * 3 + 1];
-        uz = displacement[nearest * 3 + 2];
-      }
+      // The tetrahedral field and the tessellated viewport surface are both
+      // dense; nearest-node lookup is visually smooth and avoids a 125-cell
+      // weighted search per vertex on large models.
+      const valueSum = values[nearest];
+      const ux = displacement[nearest * 3];
+      const uy = displacement[nearest * 3 + 1];
+      const uz = displacement[nearest * 3 + 2];
       dx = ux * deformationScale;
       dy = uy * deformationScale;
       dz = uz * deformationScale;

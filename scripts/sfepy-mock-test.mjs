@@ -66,6 +66,16 @@ await page.waitForTimeout(1200);
 const body = await page.locator('body').innerText();
 const hasSfePy = body.includes('SfePy');
 const hasResult = body.includes('校核完成') && body.includes('MPa');
+const switchStart = Date.now();
+await page.getByRole('button', { name: '结果场', exact: true }).first().click();
+await page.waitForFunction(
+  () => document.body.innerText.includes('VON MISES') || document.body.innerText.includes('合位移'),
+  null,
+  { timeout: 15000 },
+);
+const switchMs = Date.now() - switchStart;
+await page.waitForTimeout(500);
+await page.screenshot({ path: 'screenshots/28-result-field.png' });
 await page.getByRole('button', { name: /分析工作台/ }).first().click();
 await page.waitForFunction(() => document.body.innerText.includes('解析解'), null, { timeout: 180000 });
 await page.waitForTimeout(500);
@@ -73,6 +83,6 @@ await page.screenshot({ path: 'screenshots/26-sfepy-validation.png' });
 const validationText = await page.locator('body').innerText();
 const hasValidation = validationText.includes('解析解') && validationText.includes('误差');
 fs.writeFileSync('screenshots/sfepy-errors.txt', errors.join('\n'), 'utf8');
-console.log({ hasSfePy, hasResult, hasValidation, autoRan });
+console.log({ hasSfePy, hasResult, hasValidation, autoRan, switchMs });
 console.log('errors:', errors.join('\n') || 'none');
 await browser.close();
