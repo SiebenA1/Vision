@@ -23,7 +23,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 HOST = os.environ.get("VISION_ENGINEERING_HOST", "127.0.0.1")
-PORT = int(os.environ.get("VISION_ENGINEERING_PORT", "8105"))
+PORT = int(os.environ.get("VISION_ENGINEERING_PORT", "8106"))
 
 try:
     from build123d import import_step, export_stl  # noqa: F401
