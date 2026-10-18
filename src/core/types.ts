@@ -83,6 +83,13 @@ export interface ModelDocument {
   };
 }
 
+export interface ProjectRecord {
+  id: string;
+  model: ModelDocument;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Box3 {
   min: Vec3;
   max: Vec3;

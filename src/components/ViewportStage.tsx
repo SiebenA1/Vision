@@ -54,8 +54,8 @@ export function ViewportStage({ onRun, onOpenAnalysis }: ViewportStageProps) {
 
         <div className="stage-overlay stage-overlay--top-left">
           <div className="stage-title">
-            <span className="eyebrow">BRK-042 / STRUCTURAL STATIC</span>
-            <h1>轻量悬挂支架</h1>
+            <span className="eyebrow">{model.code} / STRUCTURAL STATIC</span>
+            <h1>{model.name}</h1>
             <div className="stage-title__meta">
               <span>{model.materialId}</span>
               <span>

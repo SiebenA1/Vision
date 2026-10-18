@@ -1,7 +1,8 @@
-import { Suspense, lazy, useEffect, useRef } from 'react';
-import { AlertTriangle, CheckCircle2, Info, X } from 'lucide-react';
+import { Suspense, lazy, useEffect, useRef, useState } from 'react';
+import { AlertTriangle, CheckCircle2, Info, PanelLeftOpen, X } from 'lucide-react';
 import { TopBar } from './components/TopBar';
 import { LlmSettingsModal } from './components/LlmSettingsModal';
+import { ProjectCenterModal } from './components/ProjectCenterModal';
 import { ToolRail } from './components/ToolRail';
 import { ModelPanel } from './components/ModelPanel';
 import { ViewportStage } from './components/ViewportStage';
@@ -70,9 +71,17 @@ export default function App() {
   const addToast = useAppStore((state) => state.addToast);
   const settingsOpen = useLlmStore((state) => state.settingsOpen);
   const closeLlmSettings = useLlmStore((state) => state.closeSettings);
+  const [projectCenterOpen, setProjectCenterOpen] = useState(false);
   const autoSolved = useRef(false);
   const firstModelEffect = useRef(true);
-  const variableSignature = model.variables.map((variable) => `${variable.key}:${variable.value}`).join('|');
+  const variableSignature = JSON.stringify({
+    code: model.code,
+    name: model.name,
+    materialId: model.materialId,
+    variables: model.variables.map((variable) => [variable.key, variable.value]),
+    loads: model.loads.map((load) => [load.face, load.magnitude, load.vector, load.enabled]),
+    supports: model.supports.map((support) => [support.face, support.enabled]),
+  });
 
   useEffect(() => {
     void useAppStore.getState().rebuildGeometry();
@@ -91,6 +100,19 @@ export default function App() {
   }, [variableSignature]);
 
   useEffect(() => {
+    const timer = window.setTimeout(() => {
+      useAppStore.getState().syncProject();
+    }, 650);
+    return () => window.clearTimeout(timer);
+  }, [variableSignature]);
+
+  useEffect(() => {
+    const persist = () => useAppStore.getState().syncProject();
+    window.addEventListener('beforeunload', persist);
+    return () => window.removeEventListener('beforeunload', persist);
+  }, []);
+
+  useEffect(() => {
     if (!geometry || autoSolved.current) return;
     autoSolved.current = true;
     const timer = window.setTimeout(() => {
@@ -107,6 +129,10 @@ export default function App() {
         event.preventDefault();
         if (event.shiftKey) useAppStore.getState().redo();
         else useAppStore.getState().undo();
+      }
+      if (event.key === '[' && !editing) {
+        event.preventDefault();
+        useAppStore.getState().toggleLeft();
       }
     };
     window.addEventListener('keydown', handler);
@@ -192,12 +218,17 @@ export default function App() {
         onExportReport={() => void exportReport()}
         onReset={reset}
         onOpenLlmSettings={() => useLlmStore.getState().openSettings()}
+        onOpenProjects={() => {
+          useAppStore.getState().syncProject();
+          setProjectCenterOpen(true);
+        }}
       />
       <div className="app-body">
         <ToolRail onOpenAnalysis={openAnalysis} onOpenOptimize={openOptimize} />
         {leftCollapsed ? (
           <button type="button" className="left-expand" onClick={toggleLeft} title="展开模型面板">
-            <span>MODEL</span>
+            <PanelLeftOpen size={15} />
+            <span>模型面板</span>
           </button>
         ) : (
           <ModelPanel />
@@ -230,6 +261,7 @@ export default function App() {
       )}
 
       {settingsOpen && <LlmSettingsModal onClose={closeLlmSettings} />}
+      {projectCenterOpen && <ProjectCenterModal onClose={() => setProjectCenterOpen(false)} />}
     </div>
   );
 }

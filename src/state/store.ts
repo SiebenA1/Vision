@@ -8,12 +8,20 @@ import type {
   GeometryMetrics,
   ModelDocument,
   OptimizationResult,
+  ProjectRecord,
   ToastMessage,
   ValidationResult,
   WorkspaceId,
 } from '../core/types';
 import type { SolveProgress } from '../core/fea/client';
 import { BRACKET_MODEL, cloneModel } from '../core/presets';
+import {
+  isModelDocument,
+  loadProjectLibrary,
+  makeProjectRecord,
+  nextProjectCode,
+  persistProjectLibrary,
+} from '../core/projects';
 import { getMaterial, massFromVolume, type MaterialSpec } from '../core/materials';
 import { buildGeometry } from '../core/geometry/kernel';
 import type { OptimizerProgress } from '../core/optimization/optimizer';
@@ -30,6 +38,8 @@ interface OptimizationSeed {
 
 interface AppState {
   model: ModelDocument;
+  projects: ProjectRecord[];
+  activeProjectId: string;
   geometry: GeometryData | null;
   geometryMetrics: GeometryMetrics | null;
   geometryError: string | null;
@@ -75,6 +85,14 @@ interface AppState {
   setGeometry: (geometry: GeometryData | null) => void;
   rebuildGeometry: () => Promise<GeometryData | null>;
   setBuilding: (building: boolean) => void;
+
+  syncProject: () => void;
+  switchProject: (id: string) => void;
+  createProject: (name: string, code: string) => void;
+  duplicateProject: (id: string) => void;
+  deleteProject: (id: string) => void;
+  renameProject: (id: string, name: string, code: string) => void;
+  importProject: (model: ModelDocument) => boolean;
 
   setVariable: (key: string, value: number, label?: string, record?: boolean) => void;
   applyRecommendedVariable: (key: string, value: number) => void;
@@ -141,22 +159,58 @@ function metricsFor(model: ModelDocument, geometry: GeometryData): GeometryMetri
   };
 }
 
-const initialChat: ChatMessage[] = [
-  {
-    id: 'msg_seed_1',
-    role: 'assistant',
-    content:
-      'BRK-042 已载入。7 个参数化特征、AL 6061-T6 材料与 600 N 端载边界条件已同步。\n\n我建议先做一次基线校核，再以质量最小为目标搜索悬臂厚度。你也可以直接用自然语言改变几何、载荷或材料。',
-    createdAt: Date.now() - 42_000,
-    meta: {
-      kind: 'insight',
-      chips: ['基线校核', '轻量化优化', '哪里最危险？'],
+const initialLibrary = loadProjectLibrary();
+const initialProject =
+  initialLibrary.projects.find((project) => project.id === initialLibrary.activeProjectId) ??
+  initialLibrary.projects[0];
+const initialModel = cloneModel(initialProject.model);
+
+function chatSeedFor(model: ModelDocument): ChatMessage[] {
+  return [
+    {
+      id: 'msg_seed_1',
+      role: 'assistant',
+      content: `${model.code} · ${model.name} 已载入。${model.variables.length} 个参数化变量、${getMaterial(model.materialId).shortName} 材料与 ${model.loads[0]?.magnitude ?? 0} N 端载边界条件已同步。\n\n我建议先做一次基线校核，再以质量最小为目标搜索悬臂厚度。你也可以直接用自然语言改变几何、载荷或材料。`,
+      createdAt: Date.now() - 42_000,
+      meta: {
+        kind: 'insight',
+        chips: ['基线校核', '轻量化优化', '哪里最危险？'],
+      },
     },
-  },
-];
+  ];
+}
+
+function freshAnalysisState() {
+  return {
+    analysis: null,
+    analysisStatus: 'idle' as const,
+    analysisError: null,
+    solveProgress: null,
+    resultStale: false,
+    validation: null,
+    validationStatus: 'idle' as const,
+    geometry: null,
+    geometryMetrics: null,
+    geometryError: null,
+    building: false,
+    featureLog: [] as string[],
+    viewMode: 'design' as const,
+    history: [],
+    future: [],
+    optimization: null,
+    optimizationProgress: null,
+    optimizationStatus: 'idle' as const,
+    optimizationError: null,
+    activeWorkspace: null,
+    chatBusy: false,
+    agentSource: null as 'local' | 'deepseek' | null,
+  };
+}
 
 export const useAppStore = create<AppState>()((set, get) => ({
-  model: cloneModel(BRACKET_MODEL),
+  model: initialModel,
+  projects: initialLibrary.projects,
+  activeProjectId: initialProject.id,
   geometry: null,
   geometryMetrics: null,
   geometryError: null,
@@ -185,7 +239,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
   showEdges: true,
   showAnnotations: true,
 
-  chat: initialChat,
+  chat: chatSeedFor(initialModel),
   chatBusy: false,
   agentSource: null,
 
@@ -239,6 +293,165 @@ export const useAppStore = create<AppState>()((set, get) => ({
       });
       return null;
     }
+  },
+
+  syncProject: () => {
+    const state = get();
+    if (!state.activeProjectId) return;
+    const now = new Date().toISOString();
+    const projects = state.projects.map((project) =>
+      project.id === state.activeProjectId
+        ? { ...project, model: cloneModel(state.model), updatedAt: now }
+        : project,
+    );
+    set({ projects });
+    persistProjectLibrary(projects, state.activeProjectId);
+  },
+
+  switchProject: (id) => {
+    const state = get();
+    if (id === state.activeProjectId) return;
+    const now = new Date().toISOString();
+    const withCurrent = state.projects.map((project) =>
+      project.id === state.activeProjectId
+        ? { ...project, model: cloneModel(state.model), updatedAt: now }
+        : project,
+    );
+    const target = withCurrent.find((project) => project.id === id);
+    if (!target) return;
+    const model = cloneModel(target.model);
+    set({
+      ...freshAnalysisState(),
+      model,
+      projects: withCurrent,
+      activeProjectId: target.id,
+      selectedFeatureId: model.features.find((feature) => feature.id === 'arm')?.id ?? model.features[0]?.id ?? 'arm',
+      selectedVariableKey: 'armThickness',
+      chat: chatSeedFor(model),
+    });
+    persistProjectLibrary(withCurrent, target.id);
+    window.setTimeout(() => {
+      void get().rebuildGeometry();
+    }, 0);
+  },
+
+  createProject: (name, code) => {
+    const state = get();
+    const cleanName = name.trim() || '未命名支架';
+    const cleanCode = (code.trim() || nextProjectCode(state.projects)).toUpperCase();
+    if (state.projects.some((project) => project.model.code === cleanCode)) {
+      get().addToast({ title: '项目编号已存在', detail: cleanCode, tone: 'warning' });
+      return;
+    }
+    const model = cloneModel(state.model);
+    model.id = `mdl_${Date.now().toString(36)}`;
+    model.code = cleanCode;
+    model.name = cleanName;
+    model.revision = 'R01';
+    model.subtitle = 'New parametric bracket project';
+    model.meta.created = new Date().toISOString().slice(0, 10);
+    const record = makeProjectRecord(model);
+    set({ projects: [...state.projects, record] });
+    get().switchProject(record.id);
+  },
+
+  duplicateProject: (id) => {
+    const state = get();
+    const source = state.projects.find((project) => project.id === id);
+    if (!source) return;
+    let suffix = 1;
+    let code = `${source.model.code}-C`;
+    const codes = new Set(state.projects.map((project) => project.model.code));
+    while (codes.has(code)) {
+      suffix += 1;
+      code = `${source.model.code}-C${suffix}`;
+    }
+    const model = cloneModel(source.model);
+    model.id = `mdl_${Date.now().toString(36)}`;
+    model.code = code;
+    model.name = `${source.model.name} 副本`;
+    model.revision = 'R01';
+    model.meta.created = new Date().toISOString().slice(0, 10);
+    const record = makeProjectRecord(model);
+    set({ projects: [...state.projects, record] });
+    get().switchProject(record.id);
+  },
+
+  deleteProject: (id) => {
+    get().syncProject();
+    const state = get();
+    if (state.projects.length <= 1) {
+      get().addToast({ title: '至少保留一个项目', tone: 'warning' });
+      return;
+    }
+    const remaining = state.projects.filter((project) => project.id !== id);
+    if (id !== state.activeProjectId) {
+      set({ projects: remaining });
+      persistProjectLibrary(remaining, state.activeProjectId);
+      return;
+    }
+    const fallback = remaining[0];
+    const model = cloneModel(fallback.model);
+    set({
+      ...freshAnalysisState(),
+      model,
+      projects: remaining,
+      activeProjectId: fallback.id,
+      selectedFeatureId: model.features.find((feature) => feature.id === 'arm')?.id ?? model.features[0]?.id ?? 'arm',
+      selectedVariableKey: 'armThickness',
+      chat: chatSeedFor(model),
+    });
+    persistProjectLibrary(remaining, fallback.id);
+    window.setTimeout(() => {
+      void get().rebuildGeometry();
+    }, 0);
+  },
+
+  renameProject: (id, name, code) => {
+    const state = get();
+    const cleanName = name.trim();
+    const cleanCode = code.trim().toUpperCase();
+    if (!cleanName || !cleanCode) return;
+    if (state.projects.some((project) => project.id !== id && project.model.code === cleanCode)) {
+      get().addToast({ title: '项目编号已存在', detail: cleanCode, tone: 'warning' });
+      return;
+    }
+    const now = new Date().toISOString();
+    const projects = state.projects.map((project) =>
+      project.id === id
+        ? {
+            ...project,
+            updatedAt: now,
+            model: { ...cloneModel(project.model), name: cleanName, code: cleanCode },
+          }
+        : project,
+    );
+    if (id === state.activeProjectId) {
+      const model = cloneModel(state.model);
+      model.name = cleanName;
+      model.code = cleanCode;
+      set({ model, projects });
+    } else {
+      set({ projects });
+    }
+    persistProjectLibrary(projects, state.activeProjectId);
+  },
+
+  importProject: (model) => {
+    if (!isModelDocument(model)) {
+      get().addToast({ title: '导入失败', detail: '文件不是 VISION model/1 文档。', tone: 'error' });
+      return false;
+    }
+    const state = get();
+    const imported = cloneModel(model);
+    imported.id = imported.id || `mdl_${Date.now().toString(36)}`;
+    if (state.projects.some((project) => project.model.code === imported.code)) {
+      imported.code = `${imported.code}-I`;
+    }
+    const record = makeProjectRecord(imported);
+    set({ projects: [...state.projects, record] });
+    get().switchProject(record.id);
+    return true;
   },
 
   setVariable: (key, value, label, record = true) => {
@@ -424,32 +637,29 @@ export const useAppStore = create<AppState>()((set, get) => ({
   setOptimizationStatus: (optimizationStatus) => set({ optimizationStatus }),
   setOptimizationError: (optimizationError) => set({ optimizationError }),
 
-  resetProject: () =>
+  resetProject: () => {
+    const state = get();
+    const model = cloneModel(BRACKET_MODEL);
+    const projects = state.projects.map((project) =>
+      project.id === state.activeProjectId
+        ? { ...project, model: cloneModel(model), updatedAt: new Date().toISOString() }
+        : project,
+    );
     set({
-      model: cloneModel(BRACKET_MODEL),
-      geometry: null,
-      geometryMetrics: null,
-      geometryError: null,
-      analysis: null,
-      analysisStatus: 'idle',
-      analysisError: null,
-      solveProgress: null,
-      resultStale: false,
-      validation: null,
-      validationStatus: 'idle',
-      activeWorkspace: null,
+      ...freshAnalysisState(),
+      model,
+      projects,
       selectedFeatureId: 'arm',
       selectedVariableKey: 'armThickness',
-      history: [],
-      future: [],
-      viewMode: 'design',
-      chat: initialChat,
+      chat: chatSeedFor(model),
       chatBusy: false,
       agentSource: null,
-      optimization: null,
-      optimizationStatus: 'idle',
-      optimizationProgress: null,
-    }),
+    });
+    persistProjectLibrary(projects, state.activeProjectId);
+    window.setTimeout(() => {
+      void get().rebuildGeometry();
+    }, 0);
+  },
 }));
 
 export function currentMaterial(): MaterialSpec {

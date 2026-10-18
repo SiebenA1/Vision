@@ -4,8 +4,11 @@ import {
   Cpu,
   Download,
   FileText,
+  FolderKanban,
   GitBranch,
   MoreHorizontal,
+  PanelLeftClose,
+  PanelLeftOpen,
   Play,
   Redo2,
   RotateCcw,
@@ -21,6 +24,7 @@ interface TopBarProps {
   onExportReport: () => void;
   onReset: () => void;
   onOpenLlmSettings: () => void;
+  onOpenProjects: () => void;
 }
 
 function Wordmark() {
@@ -47,12 +51,15 @@ export function TopBar({
   onExportReport,
   onReset,
   onOpenLlmSettings,
+  onOpenProjects,
 }: TopBarProps) {
   const model = useAppStore((state) => state.model);
   const history = useAppStore((state) => state.history);
   const future = useAppStore((state) => state.future);
   const analysisStatus = useAppStore((state) => state.analysisStatus);
   const resultStale = useAppStore((state) => state.resultStale);
+  const leftCollapsed = useAppStore((state) => state.leftCollapsed);
+  const toggleLeft = useAppStore((state) => state.toggleLeft);
   const undo = useAppStore((state) => state.undo);
   const redo = useAppStore((state) => state.redo);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -73,9 +80,24 @@ export function TopBar({
       <div className="topbar__brand">
         <Wordmark />
         <div className="topbar__divider" />
+        <button
+          type="button"
+          className={`icon-button topbar__panel-toggle ${leftCollapsed ? 'is-collapsed' : ''}`}
+          onClick={toggleLeft}
+          title={leftCollapsed ? '展开模型面板' : '收起模型面板'}
+          aria-label={leftCollapsed ? '展开模型面板' : '收起模型面板'}
+        >
+          {leftCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+        </button>
         <div className="project-crumb">
           <span className="eyebrow">PROJECT</span>
-          <button type="button" className="project-crumb__title">
+          <button
+            type="button"
+            className="project-crumb__title"
+            onClick={onOpenProjects}
+            aria-haspopup="dialog"
+            title="打开工程中心"
+          >
             {model.code} <span>·</span> {model.name}
             <ChevronDown size={13} />
           </button>
@@ -137,6 +159,9 @@ export function TopBar({
           {menuOpen && (
             <div className="dropdown-menu">
               <div className="dropdown-menu__label">PROJECT</div>
+              <button type="button" onClick={() => { setMenuOpen(false); onOpenProjects(); }}>
+                <FolderKanban size={14} /> 工程中心
+              </button>
               <button type="button" onClick={() => { setMenuOpen(false); onOpenAnalysis(); }}>
                 <Play size={14} /> 打开分析工作台
               </button>

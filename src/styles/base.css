@@ -396,6 +396,22 @@ input[type='number']::-webkit-inner-spin-button {
   background: var(--line);
 }
 
+.topbar__panel-toggle {
+  width: 27px;
+  height: 27px;
+  color: var(--muted);
+}
+
+.topbar__panel-toggle:hover {
+  color: var(--ink);
+}
+
+.topbar__panel-toggle.is-collapsed {
+  border-color: rgba(244, 91, 50, 0.28);
+  background: var(--accent-soft);
+  color: var(--accent-deep);
+}
+
 .project-crumb {
   display: flex;
   flex-direction: column;
@@ -696,21 +712,32 @@ input[type='number']::-webkit-inner-spin-button {
 }
 
 .left-expand {
-  width: 26px;
-  flex: 0 0 26px;
+  width: 38px;
+  flex: 0 0 38px;
   border-right: 1px solid var(--line);
   background: #eeebe2;
   color: var(--muted);
   font-family: var(--font-mono);
-  font-size: 8px;
-  letter-spacing: 0.12em;
-  writing-mode: vertical-rl;
+  font-size: 7.5px;
+  letter-spacing: 0.1em;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
+  gap: 8px;
+  padding-top: 18px;
+}
+
+.left-expand span {
+  writing-mode: vertical-rl;
+  color: var(--muted);
 }
 
 .left-expand:hover {
   color: var(--ink);
   background: #e7e4da;
+}
+
+.left-expand:hover span {
+  color: var(--ink);
 }

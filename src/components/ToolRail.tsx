@@ -33,8 +33,10 @@ const items: Array<{
 export function ToolRail({ onOpenAnalysis, onOpenOptimize }: ToolRailProps) {
   const rail = useAppStore((state) => state.rail);
   const activeWorkspace = useAppStore((state) => state.activeWorkspace);
+  const leftCollapsed = useAppStore((state) => state.leftCollapsed);
   const setRail = useAppStore((state) => state.setRail);
   const openWorkspace = useAppStore((state) => state.openWorkspace);
+  const toggleLeft = useAppStore((state) => state.toggleLeft);
   const addToast = useAppStore((state) => state.addToast);
 
   return (
@@ -69,6 +71,7 @@ export function ToolRail({ onOpenAnalysis, onOpenOptimize }: ToolRailProps) {
                 }
                 openWorkspace(null);
                 setRail(item.id);
+                if (leftCollapsed) toggleLeft();
               }}
             >
               <Icon size={19} strokeWidth={1.7} />

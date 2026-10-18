@@ -6,6 +6,7 @@ import { solveVoxelMesh, toAnalysisResult, validateCantilever } from '../src/cor
 import { getMaterial } from '../src/core/materials';
 import { parseEngineeringPrompt } from '../src/core/agent/nlu';
 import { buildDeepSeekTools, directionVector } from '../src/core/llm/tools';
+import { isModelDocument, nextProjectCode, seedProjects } from '../src/core/projects';
 
 describe('parametric geometry kernel', () => {
   it('builds a watertight bracket with positive volume', async () => {
@@ -123,5 +124,17 @@ describe('DeepSeek tool contract', () => {
     expect(params.properties.key.enum).toContain('armThickness');
     expect(directionVector('down')).toEqual([0, 0, -1]);
     expect(directionVector('right')).toEqual([1, 0, 0]);
+  });
+});
+
+describe('project library', () => {
+  it('seeds three distinct engineering projects', () => {
+    const projects = seedProjects();
+    expect(projects).toHaveLength(3);
+    expect(new Set(projects.map((project) => project.model.code)).size).toBe(3);
+    expect(projects.some((project) => project.model.code === 'BRK-042-L')).toBe(true);
+    expect(isModelDocument(projects[0].model)).toBe(true);
+    expect(isModelDocument({ schema: 'wrong' })).toBe(false);
+    expect(nextProjectCode(projects).startsWith('BRK-')).toBe(true);
   });
 });

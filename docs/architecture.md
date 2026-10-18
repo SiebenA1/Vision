@@ -65,6 +65,26 @@ This separation is deliberate:
 
 The model has a stable `schema: 'vision.model/1'`. The feature descriptors are intentionally declarative: `buildGeometry()` maps variable values to exact operations. This makes the CAD history inspectable without serializing the intermediate kernel objects.
 
+### 3.1 Project library
+
+`ProjectRecord` wraps a model with identity and timestamps. The store keeps:
+
+- `projects: ProjectRecord[]`
+- `activeProjectId: string`
+- the active `model` (the editable working copy)
+
+Persistence uses two localStorage keys (`vision.project.library.v1`, `vision.project.active.v1`). The active project is synced after a debounce whenever the model signature changes, and on `beforeunload`. Switching projects:
+
+1. saves the current working model into its project record,
+2. loads a clone of the target record into the store,
+3. resets derived state (geometry, analysis, optimization, history, view mode),
+4. adds a project seed message to the chat and resets DeepSeek conversation history,
+5. rebuilds geometry from the target model.
+
+The UI exposes switching, creation from the current model, duplication, delete, rename, JSON import/export, and double-click open. This is intentionally a local project library, not a server-backed collaboration system.
+
+Derived artifacts are never persisted with the project. On reload, the model is restored but geometry and results are rebuilt on demand.
+
 ## 4. Geometry build
 
 `src/core/geometry/kernel.ts`

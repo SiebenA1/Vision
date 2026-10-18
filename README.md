@@ -17,6 +17,8 @@ VISION 是一个运行在浏览器里的 AI 原生工程工作台原型。它把
 - **语言交互**：中文 / English 意图 → DeepSeek 流式工具调用，或本地确定性规划器回退；可改参数、换材料、加载荷、改约束、求解、优化、生成报告。
 - **完整大模型能力**：`deepseek-flash` / `deepseek-v4-pro`、thinking 模式与 reasoning effort、SSE 流式输出、多轮工具调用、reasoning_content 回放、token usage、失败回退。
 - **本地安全网关**：Vite 代理转发到 DeepSeek 固定域名，避免浏览器 CORS；支持浏览器会话 Key 或服务端 `DEEPSEEK_API_KEY` 注入。
+- **工程中心**：本地项目库，项目切换、派生、复制、重命名、删除、JSON 导入/导出与自动保存；项目 crumb 和下拉箭头打开同一工程中心。
+- **可收合工作区**：模型面板可收起，顶部固定的 `PanelLeft` 按钮或 `[` 快捷键可重新展开；收起状态有橙色高亮提示。
 - **参数化建模**：7 个特征、14 个设计变量，基于 Manifold 的 watertight mesh-boolean 内核实时重建。
 - **真实 CAE**：C3D8 六面体网格、线弹性静力、矩阵自由 PCG + Jacobi，全部在浏览器 Worker 中运行。
 - **工程证据**：解析基准验证、反力平衡、PCG 残差、网格质量、模型指纹、限制声明与 Markdown 报告。
@@ -50,7 +52,7 @@ npm run preview
 验证：
 
 ```bash
-npm test          # 7/7：几何 / 求解器 / 解析器 / DeepSeek 工具契约
+npm test          # 8/8：几何 / 求解器 / 解析器 / DeepSeek 工具契约 / 项目库
 npm run typecheck
 ```
 
@@ -296,6 +298,10 @@ dist/assets/manifold-*.wasm
 |---|---|
 | ![DeepSeek 设置](docs/assets/deepseek-settings.png) | ![DeepSeek 对话](docs/assets/deepseek-chat.png) |
 
+| 工程中心 / Project Library |
+|---|
+| ![工程中心](docs/assets/project-center.png) |
+
 > 对话截图使用本地 SSE mock 验证了“流式 reasoning + tool call + 工具结果回传 + 最终回答”的完整 UI 闭环；真实 DeepSeek 调用需要配置 API Key。配置页截图中输入的是 mock key。
 
 ---
@@ -305,14 +311,15 @@ dist/assets/manifold-*.wasm
 ```text
 .
 ├─ src/
-│  ├─ core/            # 几何、FEA、优化、材料、报告、Agent
+│  ├─ core/            # 几何、FEA、优化、材料、报告、Agent、项目库
 │  │  ├─ llm/          # DeepSeek client / tools / prompt / types
-│  │  └─ agent/        # 本地意图解析
-│  ├─ components/      # 工作台壳、场景、面板、DeepSeek 设置
+│  │  ├─ agent/        # 本地意图解析
+│  │  └─ projects.ts   # 项目记录、本地持久化、JSON 校验
+│  ├─ components/      # 工作台壳、场景、面板、DeepSeek 设置、工程中心
 │  ├─ features/        # 按需加载的分析 / 优化工作台
 │  ├─ services/        # 双规划器、求解编排、工具执行
 │  ├─ state/           # Zustand app + LLM stores
-│  ├─ styles/          # tokens + base + panels + workspaces + llm
+│  ├─ styles/          # tokens + base + panels + workspaces + llm + projects
 │  └─ lib/             # 格式化
 ├─ tests/              # 几何 / 求解器 / 解析器用例
 ├─ docs/
