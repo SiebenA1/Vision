@@ -7,7 +7,6 @@ import type {
   GeometryData,
   GeometryMetrics,
   ModelDocument,
-  OptimizationResult,
   ProjectRecord,
   ToastMessage,
   ValidationResult,
@@ -25,21 +24,13 @@ import {
 import { base64ToUint8, parseBinaryStl } from '../core/cad/stl';
 import { createExternalModel, type ExternalModelInput } from '../core/cad/external';
 import { getMaterial, massFromVolume, type MaterialSpec } from '../core/materials';
-import type { OptimizerProgress } from '../core/optimization/optimizer';
 
 function cloneModel<T>(value: T): T {
   return structuredClone(value);
 }
 
 export type AnalysisStatus = 'idle' | 'queued' | 'mesh' | 'solve' | 'refine' | 'ready' | 'error';
-export type OverlayWorkspace = 'analysis' | 'optimize' | null;
-
-interface OptimizationSeed {
-  variableKey: string;
-  targetSafety: number;
-  displacementLimit: number;
-  autoRun: boolean;
-}
+export type OverlayWorkspace = 'analysis' | null;
 
 interface AppState {
   model: ModelDocument;
@@ -81,11 +72,6 @@ interface AppState {
   future: Array<{ model: ModelDocument; label: string }>;
 
   toasts: ToastMessage[];
-  optimizationSeed: OptimizationSeed;
-  optimization: OptimizationResult | null;
-  optimizationProgress: OptimizerProgress | null;
-  optimizationStatus: 'idle' | 'running' | 'ready' | 'error';
-  optimizationError: string | null;
 
   setGeometry: (geometry: GeometryData | null) => void;
   rebuildGeometry: () => Promise<GeometryData | null>;
@@ -139,12 +125,6 @@ interface AppState {
 
   addToast: (toast: Omit<ToastMessage, 'id'>) => void;
   dismissToast: (id: string) => void;
-
-  setOptimizationSeed: (seed: Partial<OptimizationSeed>) => void;
-  setOptimization: (result: OptimizationResult | null) => void;
-  setOptimizationProgress: (progress: OptimizerProgress | null) => void;
-  setOptimizationStatus: (status: 'idle' | 'running' | 'ready' | 'error') => void;
-  setOptimizationError: (message: string | null) => void;
 
   resetProject: () => void;
 }
@@ -211,10 +191,6 @@ function freshAnalysisState() {
     viewMode: 'design' as const,
     history: [],
     future: [],
-    optimization: null,
-    optimizationProgress: null,
-    optimizationStatus: 'idle' as const,
-    optimizationError: null,
     activeWorkspace: null,
     chatBusy: false,
     agentSource: null as 'local' | 'deepseek' | null,
@@ -261,16 +237,6 @@ export const useAppStore = create<AppState>()((set, get) => ({
   future: [],
 
   toasts: [],
-  optimizationSeed: {
-    variableKey: 'armThickness',
-    targetSafety: 2.0,
-    displacementLimit: 2.0,
-    autoRun: false,
-  },
-  optimization: null,
-  optimizationProgress: null,
-  optimizationStatus: 'idle',
-  optimizationError: null,
 
   setGeometry: (geometry) =>
     set((state) => ({
@@ -745,12 +711,6 @@ export const useAppStore = create<AppState>()((set, get) => ({
   },
 
   dismissToast: (id) => set((state) => ({ toasts: state.toasts.filter((item) => item.id !== id) })),
-
-  setOptimizationSeed: (seed) => set((state) => ({ optimizationSeed: { ...state.optimizationSeed, ...seed } })),
-  setOptimization: (optimization) => set({ optimization }),
-  setOptimizationProgress: (optimizationProgress) => set({ optimizationProgress }),
-  setOptimizationStatus: (optimizationStatus) => set({ optimizationStatus }),
-  setOptimizationError: (optimizationError) => set({ optimizationError }),
 
   resetProject: () => {
     const state = get();

@@ -1,8 +1,7 @@
 import type { SolveProgress } from '../core/fea/client';
 import { getSimulationClient } from '../core/fea/client';
 import { getMaterial } from '../core/materials';
-import { runOptimization, type OptimizerProgress } from '../core/optimization/optimizer';
-import type { AnalysisResult, OptimizationResult } from '../core/types';
+import type { AnalysisResult } from '../core/types';
 import { useAppStore } from '../state/store';
 
 let runToken = 0;
@@ -129,59 +128,6 @@ export async function runValidation(): Promise<void> {
   } catch {
     if (token !== validationToken) return;
     useAppStore.getState().setValidationStatus('error');
-  }
-}
-
-export async function runOptimizationStudy(options?: {
-  variableKey?: string;
-  targetSafety?: number;
-  displacementLimit?: number;
-  autoApply?: boolean;
-}): Promise<OptimizationResult | null> {
-  const store = useAppStore.getState();
-  if (store.optimizationStatus === 'running') return store.optimization;
-  const seed = store.optimizationSeed;
-  const variableKey = options?.variableKey ?? seed.variableKey;
-  const targetSafety = options?.targetSafety ?? seed.targetSafety;
-  const displacementLimit = options?.displacementLimit ?? seed.displacementLimit;
-  store.setOptimizationStatus('running');
-  store.setOptimizationError(null);
-  store.setOptimizationProgress({
-    stage: 'baseline',
-    completed: 0,
-    total: 10,
-    message: '建立 FE-in-the-loop 搜索空间',
-  });
-  try {
-    const result = await runOptimization(store.model, {
-      variableKey,
-      targetSafety,
-      displacementLimit,
-      onProgress: (progress: OptimizerProgress) => {
-        useAppStore.getState().setOptimizationProgress(progress);
-      },
-    });
-    const latest = useAppStore.getState();
-    latest.setOptimization(result);
-    latest.setOptimizationStatus('ready');
-    latest.addToast({
-      title: result.recommended ? '优化完成' : '优化完成 · 无可行解',
-      detail: result.recommended
-        ? `${result.variableLabel} = ${result.recommended.value} mm · 质量 ${result.recommended.massKg.toFixed(3)} kg`
-        : '当前边界内无满足约束的解，请放宽目标或扩展设计空间。',
-      tone: result.recommended ? 'success' : 'warning',
-    });
-    return result;
-  } catch (error) {
-    const latest = useAppStore.getState();
-    latest.setOptimizationStatus('error');
-    latest.setOptimizationError(error instanceof Error ? error.message : String(error));
-    latest.addToast({
-      title: '优化失败',
-      detail: error instanceof Error ? error.message : String(error),
-      tone: 'error',
-    });
-    return null;
   }
 }
 

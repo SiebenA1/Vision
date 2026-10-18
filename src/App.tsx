@@ -15,7 +15,6 @@ import { resetDeepSeekConversation } from './services/deepseekAgent';
 import { fmt } from './lib/format';
 
 const AnalysisWorkspace = lazy(() => import('./features/analysis/AnalysisWorkspace'));
-const OptimizationWorkspace = lazy(() => import('./features/optimize/OptimizationWorkspace'));
 
 function WorkspaceSkeleton() {
   return (
@@ -171,15 +170,11 @@ export default function App() {
     }
   };
 
-  const openOptimize = () => {
-    useAppStore.getState().openWorkspace('optimize');
-  };
-
   const runFromStage = () => {
     if (!useAppStore.getState().geometry) {
       addToast({
-        title: '空白工程：先添加基础体',
-        detail: '在左侧模型面板或视口中央选择基础板 / 基础块 / 圆柱体。',
+        title: '尚无几何',
+        detail: '先用 build123d 描述零件；OCCT 会生成精确 B-Rep。',
         tone: 'neutral',
       });
       if (useAppStore.getState().leftCollapsed) useAppStore.getState().toggleLeft();
@@ -199,7 +194,7 @@ export default function App() {
       return;
     }
     const [{ exportBinaryStl }, { downloadBinary }] = await Promise.all([
-      import('./core/geometry/kernel'),
+      import('./core/cad/stl'),
       import('./core/report/report'),
     ]);
     const buffer = await exportBinaryStl(state.geometry);
@@ -253,7 +248,6 @@ export default function App() {
           void runStudy({ openWorkspace: true, focusResult: true, silentToast: false });
         }}
         onOpenAnalysis={openAnalysis}
-        onOpenOptimize={openOptimize}
         onExportModel={() => void exportModel()}
         onExportReport={() => void exportReport()}
         onReset={reset}
@@ -264,7 +258,7 @@ export default function App() {
         }}
       />
       <div className="app-body">
-        <ToolRail onOpenAnalysis={openAnalysis} onOpenOptimize={openOptimize} />
+        <ToolRail onOpenAnalysis={openAnalysis} />
         {leftCollapsed ? (
           <button type="button" className="left-expand" onClick={toggleLeft} title="展开模型面板">
             <PanelLeftOpen size={15} />
@@ -285,17 +279,6 @@ export default function App() {
             onRun={() => void runStudy({ focusResult: false, silentToast: false })}
             onRefine={refine}
             onExport={() => void exportReport()}
-          />
-        </Suspense>
-      )}
-
-      {activeWorkspace === 'optimize' && (
-        <Suspense fallback={<WorkspaceSkeleton />}>
-          <OptimizationWorkspace
-            onClose={() => useAppStore.getState().openWorkspace(null)}
-            onOpenAnalysis={() =>
-              void runStudy({ openWorkspace: true, focusResult: true, silentToast: false })
-            }
           />
         </Suspense>
       )}

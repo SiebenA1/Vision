@@ -132,26 +132,6 @@ function toolAction(call: DeepSeekToolCall): AgentAction {
       label: '',
     };
   }
-  if (name === 'optimize') {
-    return {
-      tool: 'optimize',
-      args: {
-        variableKey: String(args.variableKey ?? 'armThickness'),
-        targetSafety: asNumber(args.targetSafety ?? 2, 'targetSafety'),
-        displacementLimit: asNumber(args.displacementLimit ?? 2, 'displacementLimit'),
-      },
-      label: '',
-    };
-  }
-  if (name === 'generate_preset') {
-    const preset = String(args.preset ?? '');
-    if (!['brake-pedal', 'wind-blade'].includes(preset)) throw new Error(`未知预设：${preset}`);
-    return {
-      tool: 'generate_preset',
-      args: { preset, reason: String(args.reason ?? '') },
-      label: '',
-    };
-  }
   if (name === 'run_build123d') {
     const script = String(args.script ?? '');
     if (!script.trim()) throw new Error('build123d 脚本为空');
@@ -163,50 +143,6 @@ function toolAction(call: DeepSeekToolCall): AgentAction {
         code: String(args.code ?? ''),
         density_kg_m3: asNumber(args.density_kg_m3 ?? 2700, 'density_kg_m3'),
         materialId: String(args.materialId ?? 'AL6061-T6'),
-      },
-      label: '',
-    };
-  }
-  if (name === 'create_wheel_rim') {
-    return {
-      tool: 'create_wheel_rim',
-      args: {
-        spokeCount: asNumber(args.spokeCount, 'spokeCount'),
-        outerDiameterMm: asNumber(args.outerDiameterMm, 'outerDiameterMm'),
-        widthMm: asNumber(args.widthMm, 'widthMm'),
-        pcdMm: asNumber(args.pcdMm, 'pcdMm'),
-        centerBoreMm: asNumber(args.centerBoreMm, 'centerBoreMm'),
-        lugCount: asNumber(args.lugCount, 'lugCount'),
-        materialId: String(args.materialId ?? 'AL6061-T6'),
-      },
-      label: '',
-    };
-  }
-  if (name === 'add_solid_feature') {
-    const shape = String(args.shape ?? '');
-    if (!['box', 'cylinder', 'sphere'].includes(shape)) throw new Error(`无效实体类型：${shape}`);
-    const operation = String(args.operation ?? 'add');
-    if (!['add', 'subtract'].includes(operation)) throw new Error(`无效布尔操作：${operation}`);
-    const axis = String(args.axis ?? 'z');
-    if (!['x', 'y', 'z'].includes(axis)) throw new Error(`无效圆柱轴：${axis}`);
-    return {
-      tool: 'add_solid_feature',
-      args: {
-        shape,
-        operation,
-        x: asNumber(args.x ?? 65, 'x'),
-        y: asNumber(args.y ?? 0, 'y'),
-        z: asNumber(args.z ?? 45, 'z'),
-        sx: asNumber(args.sx ?? 40, 'sx'),
-        sy: asNumber(args.sy ?? 30, 'sy'),
-        sz: asNumber(args.sz ?? 20, 'sz'),
-        radius: asNumber(args.radius ?? 15, 'radius'),
-        height: asNumber(args.height ?? 40, 'height'),
-        axis,
-        rx: asNumber(args.rx ?? 0, 'rx'),
-        ry: asNumber(args.ry ?? 0, 'ry'),
-        rz: asNumber(args.rz ?? 0, 'rz'),
-        reason: String(args.reason ?? ''),
       },
       label: '',
     };

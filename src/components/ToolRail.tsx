@@ -6,7 +6,6 @@ import {
   Layers3,
   Library,
   SlidersHorizontal,
-  Sparkles,
   TerminalSquare,
 } from 'lucide-react';
 import type { WorkspaceId } from '../core/types';
@@ -14,23 +13,21 @@ import { useAppStore } from '../state/store';
 
 interface ToolRailProps {
   onOpenAnalysis: () => void;
-  onOpenOptimize: () => void;
 }
 
 const items: Array<{
   id: WorkspaceId;
   label: string;
   icon: typeof Cuboid;
-  action: 'rail' | 'analysis' | 'optimize';
+  action: 'rail' | 'analysis';
 }> = [
   { id: 'model', label: '模型 / Model', icon: Cuboid, action: 'rail' },
   { id: 'history', label: '特征历史 / History', icon: Clock3, action: 'rail' },
   { id: 'analysis', label: '分析 / Analysis', icon: Activity, action: 'analysis' },
-  { id: 'optimize', label: '优化 / Optimize', icon: Sparkles, action: 'optimize' },
   { id: 'materials', label: '材料 / Materials', icon: Layers3, action: 'rail' },
 ];
 
-export function ToolRail({ onOpenAnalysis, onOpenOptimize }: ToolRailProps) {
+export function ToolRail({ onOpenAnalysis }: ToolRailProps) {
   const rail = useAppStore((state) => state.rail);
   const activeWorkspace = useAppStore((state) => state.activeWorkspace);
   const leftCollapsed = useAppStore((state) => state.leftCollapsed);
@@ -50,9 +47,7 @@ export function ToolRail({ onOpenAnalysis, onOpenOptimize }: ToolRailProps) {
           const active =
             item.action === 'rail'
               ? rail === item.id && !activeWorkspace
-              : item.action === 'analysis'
-                ? activeWorkspace === 'analysis'
-                : activeWorkspace === 'optimize';
+              : activeWorkspace === 'analysis';
           return (
             <button
               key={item.id}
@@ -63,10 +58,6 @@ export function ToolRail({ onOpenAnalysis, onOpenOptimize }: ToolRailProps) {
               onClick={() => {
                 if (item.action === 'analysis') {
                   onOpenAnalysis();
-                  return;
-                }
-                if (item.action === 'optimize') {
-                  onOpenOptimize();
                   return;
                 }
                 openWorkspace(null);

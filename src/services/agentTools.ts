@@ -36,20 +36,12 @@ export function labelForAction(action: AgentAction): string {
       return `约束 ${action.args.name ?? action.args.face}`;
     case 'run_analysis':
       return action.args.refinement ? '运行 h 收敛校核' : '运行线性静力校核';
-    case 'optimize':
-      return `优化 ${label ?? action.args.variableKey} · SF ≥ ${action.args.targetSafety ?? 2}`;
     case 'explain_risk':
       return '解析危险截面与失效裕度';
     case 'export_report':
       return '生成工程校核报告';
-    case 'generate_preset':
-      return '生成工程预设模型';
-    case 'create_wheel_rim':
-      return `生成 ${action.args.spokeCount ?? 5} 辐轮辋`;
     case 'run_build123d':
       return '执行 build123d / OCCT 建模脚本';
-    case 'add_solid_feature':
-      return `添加 ${action.args.shape ?? '实体'} 特征`;
     default:
       return '执行工程工具';
   }
@@ -226,33 +218,8 @@ function actionResultSummary(action: AgentAction): string {
   if (action.tool === 'set_support') {
     return `约束切换到 **${action.args.name ?? action.args.face}**（${action.args.face}，6 DOF fixed）。`;
   }
-  if (action.tool === 'optimize') {
-    return `已打开优化工作台并启动 **${action.args.variableKey}** 的并行 FE 搜索。目标：质量最小，SF ≥ ${action.args.targetSafety}，位移 ≤ ${action.args.displacementLimit} mm。搜索仍在后台进行。`;
-  }
   if (action.tool === 'explain_risk') {
     return riskNarrative();
-  }
-  if (action.tool === 'generate_preset') {
-    const model = useAppStore.getState().model;
-    if (model.template === 'blade') {
-      return `已生成 **${model.code} · ${model.name}**。NACA 翼型 8 截面放样、弦长/扭转/厚度分布已重建为 watertight 几何。\n\n下一步可以运行基线校核，或调整叶片长度、弦长、扭角和厚度比。`;
-    }
-    if (/轮辋|轮毂|rim/i.test(model.name)) {
-      return `已生成 **${model.code} · ${model.name}**。18 英寸 5 辐轮辋：筒身、轮唇、轮毂、中心孔、5 根辐条与 5 个 PCD 114.3 螺栓孔已重建为 watertight 几何。\n\n下一步可以运行基线校核，或在 FEATURE BUILDER 中调整辐条、轮唇和螺栓孔。`;
-    }
-    return `已生成 **${model.code} · ${model.name}**。CSG 特征图包含 **${model.solidFeatures?.length ?? 0} 个特征**（安装背板、叉板、加强筋、枢轴座、踏板臂及减重/安装孔），watertight 几何已重建。\n\n下一步可以运行基线校核，或继续添加/切除实体特征。`;
-  }
-  if (action.tool === 'create_wheel_rim') {
-    const model = useAppStore.getState().model;
-    return `已按参数生成 **${model.code} · ${model.name}**。轮辋包含 **${model.solidFeatures?.filter((feature) => feature.id.startsWith('rim_spoke_')).length ?? 0} 根均匀辐条**、**${model.solidFeatures?.filter((feature) => feature.id.startsWith('rim_lug_')).length ?? 0} 个螺栓孔**，中心孔、轮唇与轮毂均为当前参数重建，watertight 几何已更新。`;
-  }
-  if (action.tool === 'run_build123d') {
-    const model = useAppStore.getState().model;
-    return `已通过 build123d/OCCT 生成 **${model.code} · ${model.name}**。几何体积 ${(useAppStore.getState().geometryMetrics?.volumeCm3 ?? 0).toFixed(1)} cm³，质量 ${(useAppStore.getState().geometryMetrics?.massKg ?? 0).toFixed(3)} kg。`;
-  }
-  if (action.tool === 'add_solid_feature') {
-    const model = useAppStore.getState().model;
-    return `已添加 **${action.args.shape}** 特征（${action.args.operation === 'subtract' ? '切除' : '添加'}）。当前 CSG 特征数 **${model.solidFeatures?.length ?? 0}**，几何已重建。`;
   }
   return '';
 }
@@ -342,17 +309,6 @@ export async function executeTool(action: AgentAction, lastResultRef: LastResult
     } else {
       throw new Error(useAppStore.getState().analysisError ?? '求解未返回结果');
     }
-  } else if (action.tool === 'optimize') {
-    const seed = {
-      variableKey: String(action.args.variableKey ?? 'armThickness'),
-      targetSafety: Number(action.args.targetSafety ?? 2.0),
-      displacementLimit: Number(action.args.displacementLimit ?? 2.0),
-      autoRun: true,
-    };
-    useAppStore.getState().setOptimizationSeed(seed);
-    useAppStore.getState().openWorkspace('optimize');
-    detail = `SF ≥ ${seed.targetSafety} · δ ≤ ${seed.displacementLimit} mm`;
-    summary = actionResultSummary(action);
   } else if (action.tool === 'explain_risk') {
     let result = useAppStore.getState().analysis;
     if (!result || useAppStore.getState().resultStale) {

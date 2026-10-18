@@ -236,29 +236,6 @@ export interface ValidationResult {
   solveMs: number;
 }
 
-export interface OptimizerCandidate {
-  value: number;
-  massKg: number;
-  safetyFactor: number;
-  maxDisplacement: number;
-  feasible: boolean;
-  status: 'screened' | 'verified';
-}
-
-export interface OptimizationResult {
-  objective: 'min-mass';
-  variableKey: string;
-  variableLabel: string;
-  targetSafety: number;
-  displacementLimit: number;
-  candidates: OptimizerCandidate[];
-  recommended: OptimizerCandidate | null;
-  baseline: OptimizerCandidate;
-  massDeltaPercent: number | null;
-  elapsedMs: number;
-  note: string;
-}
-
 export interface ChatPlanStep {
   id: string;
   label: string;
@@ -297,13 +274,9 @@ export interface AgentAction {
     | 'set_load'
     | 'set_support'
     | 'run_analysis'
-    | 'optimize'
     | 'explain_risk'
     | 'export_report'
-    | 'generate_preset'
-    | 'create_wheel_rim'
     | 'run_build123d'
-    | 'add_solid_feature'
     | 'unknown';
   args: Record<string, string | number | boolean>;
   label: string;
@@ -316,7 +289,7 @@ export interface AgentPlan {
   confidence: number;
 }
 
-export type WorkspaceId = 'model' | 'analysis' | 'optimize' | 'materials' | 'history';
+export type WorkspaceId = 'model' | 'analysis' | 'materials' | 'history';
 
 export interface ToastMessage {
   id: string;

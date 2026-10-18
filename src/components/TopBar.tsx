@@ -19,7 +19,6 @@ import { useAppStore } from '../state/store';
 interface TopBarProps {
   onRunAnalysis: () => void;
   onOpenAnalysis: () => void;
-  onOpenOptimize: () => void;
   onExportModel: () => void;
   onExportReport: () => void;
   onReset: () => void;
@@ -46,7 +45,6 @@ function Wordmark() {
 export function TopBar({
   onRunAnalysis,
   onOpenAnalysis,
-  onOpenOptimize,
   onExportModel,
   onExportReport,
   onReset,
@@ -111,9 +109,6 @@ export function TopBar({
         <button type="button" className="nav-tab" onClick={onOpenAnalysis}>
           分析工作台
           {resultStale && <span className="nav-tab__flag">STALE</span>}
-        </button>
-        <button type="button" className="nav-tab" onClick={onOpenOptimize}>
-          生成式优化
         </button>
       </nav>
 

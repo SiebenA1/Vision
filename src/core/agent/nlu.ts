@@ -156,87 +156,13 @@ function actionLabel(action: AgentAction): string {
       return `约束 ${action.args.name}`;
     case 'run_analysis':
       return '运行线性静力校核';
-    case 'optimize':
-      return '执行 FE-in-the-loop 优化';
     case 'explain_risk':
       return '解析危险截面与失效裕度';
     case 'export_report':
       return '生成工程校核报告';
-    case 'generate_preset':
-      return '生成工程预设模型';
-    case 'add_solid_feature':
-      return '添加 CSG 实体特征';
     default:
       return '等待更多信息';
   }
-}
-
-function presetPlan(preset: string, summary: string): AgentPlan {
-  return {
-    intent: 'modeling',
-    summary,
-    actions: [
-      {
-        tool: 'generate_preset',
-        args: { preset },
-        label: '生成工程预设模型',
-      },
-    ],
-    confidence: 0.97,
-  };
-}
-
-function brakePedalPlan(): AgentPlan {
-  return presetPlan(
-    'brake-pedal',
-    '将生成一个由 16 个 CSG 特征组成的刹车踏板支架：安装背板、双侧叉板、加强筋、枢轴座、踏板臂与安装/减重孔，然后重建 watertight 几何。',
-  );
-}
-
-function windBladePlan(): AgentPlan {
-  return presetPlan(
-    'wind-blade',
-    '将生成一个风电叶片：NACA 翼型沿展向 8 截面放样，弦长、厚度与扭角逐段变化，叶根固定、叶尖受载，并重建 watertight 几何。',
-  );
-}
-
-function wheelRimPlan(text: string): AgentPlan {
-  const int = (value: string | undefined, fallback: number) => {
-    const parsed = Number.parseInt(value ?? '', 10);
-    return Number.isFinite(parsed) ? parsed : fallback;
-  };
-  const number = (value: string | undefined, fallback: number) => {
-    const parsed = Number.parseFloat(value ?? '');
-    return Number.isFinite(parsed) ? parsed : fallback;
-  };
-  const inch = text.match(/(\d+(?:\.\d+)?)\s*(?:英寸|寸|inch)/);
-  const outerMm = text.match(/(?:外径|直径)\s*[:：]?\s*(\d+(?:\.\d+)?)\s*mm/);
-  const width = text.match(/(?:宽度|总宽|轮辋宽)\s*[:：]?\s*(\d+(?:\.\d+)?)\s*mm/);
-  const pcd = text.match(/pcd\s*[:：]?\s*(\d+(?:\.\d+)?)/);
-  const bore = text.match(/(?:中心孔|中心孔径)\s*[:：]?\s*(\d+(?:\.\d+)?)\s*mm/);
-  const spoke = text.match(/(\d+)\s*(?:辐|根\s*辐条|spokes?)/);
-  const lugs = text.match(/(\d+)\s*个?\s*(?:螺栓孔|螺孔|lugs?)/);
-  const spec = {
-    outerDiameterMm: outerMm ? number(outerMm[1], 457) : inch ? number(inch[1], 18) * 25.4 : 457,
-    widthMm: width ? number(width[1], 203) : 203,
-    pcdMm: pcd ? number(pcd[1], 114.3) : 114.3,
-    centerBoreMm: bore ? number(bore[1], 72.6) : 72.6,
-    spokeCount: spoke ? int(spoke[1], 5) : 5,
-    lugCount: lugs ? int(lugs[1], 5) : 5,
-    materialId: findMaterial(text) ?? 'AL6061-T6',
-  };
-  return {
-    intent: 'modeling',
-    summary: `将实时生成 ${spec.spokeCount} 辐轮辋：外径 ${Math.round(spec.outerDiameterMm)} mm、宽 ${spec.widthMm} mm、PCD ${spec.pcdMm} mm、中心孔 ${spec.centerBoreMm} mm、${spec.lugCount} 个螺栓孔；几何由参数化 CSG 生成器重建，不使用固定轮辋预设。`,
-    actions: [
-      {
-        tool: 'create_wheel_rim',
-        args: { ...spec },
-        label: `生成 ${spec.spokeCount} 辐轮辋`,
-      },
-    ],
-    confidence: 0.97,
-  };
 }
 
 export function parseEngineeringPrompt(prompt: string, model: ModelDocument): AgentPlan {
@@ -299,31 +225,6 @@ export function parseEngineeringPrompt(prompt: string, model: ModelDocument): Ag
     });
   }
 
-  const targetSafety = findTargetSafety(text) ?? 2.0;
-  const displacementLimit = findDisplacementLimit(text);
-  const mentionsSafetyTarget = /(安全系数|safety factor|\bsf\b)/i.test(text);
-  const wantsOptimize =
-    /(优化|轻量化|减重|最轻|最小质量|optimi|mass|lightweight|pareto)/.test(text) ||
-    (mentionsSafetyTarget && !/(校核|分析|验证|verify|check)/.test(text));
-  if (wantsOptimize) {
-    let variableKey = 'armThickness';
-    if (/背板厚度|壁厚|wall thickness/.test(text)) variableKey = 'wallThickness';
-    else if (/减重孔|轻量化孔|lightening/.test(text)) variableKey = 'lighteningHoleDia';
-    else if (/加强筋|筋厚|gusset/.test(text)) variableKey = 'ribThickness';
-    else if (/悬臂宽度|臂宽/.test(text)) variableKey = 'armWidth';
-    const variable = model.variables.find((item) => item.key === variableKey);
-    actions.push({
-      tool: 'optimize',
-      args: {
-        variableKey,
-        targetSafety,
-        displacementLimit: displacementLimit ?? 2.0,
-        label: variable?.label ?? variableKey,
-      },
-      label: `优化 ${variable?.label ?? variableKey} · SF ≥ ${targetSafety}`,
-    });
-  }
-
   const wantsExplain = /(哪里|最危险|危险|风险|解释|评估|复核|为什么|critical|risk|review|why|hotspot)/.test(text);
   if (wantsExplain) {
     actions.push({
@@ -342,7 +243,7 @@ export function parseEngineeringPrompt(prompt: string, model: ModelDocument): Ag
     });
   }
 
-  const wantsRun = /(校核|分析|仿真|求解|计算|计算一下|run|solve|check|verify|study)/.test(text) && !wantsOptimize;
+  const wantsRun = /(校核|分析|仿真|求解|计算|计算一下|run|solve|check|verify|study)/.test(text);
   if (wantsRun) {
     actions.push({ tool: 'run_analysis', args: {}, label: '运行线性静力校核' });
   }
@@ -373,13 +274,11 @@ export function parseEngineeringPrompt(prompt: string, model: ModelDocument): Ag
   }
 
   const summaryParts = actions.map(actionLabel);
-  const intent = wantsOptimize
-    ? 'optimization'
-    : wantsExplain
-      ? 'diagnosis'
-      : actions.some((a) => a.tool === 'run_analysis')
-        ? 'verification'
-        : 'edit';
+  const intent = wantsExplain
+    ? 'diagnosis'
+    : actions.some((a) => a.tool === 'run_analysis')
+      ? 'verification'
+      : 'edit';
 
   return {
     intent,

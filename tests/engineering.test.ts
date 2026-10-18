@@ -1,135 +1,58 @@
 import { describe, expect, it } from 'vitest';
-import { BRACKET_MODEL } from '../src/core/presets';
-import { buildGeometry } from '../src/core/geometry/kernel';
-import { voxelMesh } from '../src/core/fea/mesher';
-import { solveVoxelMesh, toAnalysisResult, validateCantilever } from '../src/core/fea/solver';
-import { getMaterial } from '../src/core/materials';
-import { parseEngineeringPrompt } from '../src/core/agent/nlu';
+import { validateCantilever } from '../src/core/fea/solver';
 import { buildDeepSeekTools, directionVector } from '../src/core/llm/tools';
+import { parseEngineeringPrompt } from '../src/core/agent/nlu';
 import { isModelDocument, nextProjectCode, seedProjects } from '../src/core/projects';
-import { createBlankModel, createStarterModel, createBrakePedalModel, createWindBladeModel, createWheelRimModel } from '../src/core/templates';
+import { exportBinaryStl, parseBinaryStl } from '../src/core/cad/stl';
+import type { GeometryData } from '../src/core/types';
 
-describe('parametric geometry kernel', () => {
-  it('builds a watertight bracket with positive volume', async () => {
-    const { geometry } = await buildGeometry(BRACKET_MODEL);
-    expect(geometry.volumeMm3).toBeGreaterThan(100_000);
-    expect(geometry.triangleCount).toBeGreaterThan(500);
-    expect(geometry.bbox.max[0]).toBeCloseTo(BRACKET_MODEL.variables.find((v) => v.key === 'armLength')!.value, 0);
-    expect(geometry.watermark).toMatch(/^[0-9A-F]{8}$/);
-    console.info(
-      `geometry: ${(geometry.volumeMm3 / 1000).toFixed(1)} cm³, ${geometry.triangleCount} tri, ${geometry.buildMs.toFixed(0)} ms`,
-    );
-  }, 60_000);
-
-  it('changes volume when a parameter changes', async () => {
-    const model = structuredClone(BRACKET_MODEL);
-    const arm = model.variables.find((v) => v.key === 'armThickness')!;
-    arm.value += 4;
-    const { geometry } = await buildGeometry(model);
-    const original = await buildGeometry(BRACKET_MODEL);
-    expect(geometry.volumeMm3).toBeGreaterThan(original.geometry.volumeMm3);
-  }, 60_000);
-});
-
-describe('C3D8 linear static solver', () => {
+describe('CAE validation', () => {
   it('matches the analytic cantilever benchmark', () => {
     const validation = validateCantilever();
+    expect(validation.passed).toBe(true);
+    expect(validation.errorPercent).toBeLessThan(8);
     console.info(
-      `validation: analytic=${validation.reference.toFixed(5)} mm, computed=${validation.computed.toFixed(5)} mm, error=${validation.errorPercent.toFixed(2)}%, ${validation.solveMs.toFixed(0)} ms`,
+      `validation: analytic=${validation.reference.toFixed(5)} mm, computed=${validation.computed.toFixed(5)} mm, error=${validation.errorPercent.toFixed(2)}%`,
     );
-    expect(Number.isFinite(validation.computed)).toBe(true);
-    expect(validation.errorPercent).toBeLessThan(validation.tolerancePercent);
-  }, 120_000);
-
-  it('solves the bracket and satisfies global equilibrium', async () => {
-    const { geometry } = await buildGeometry(BRACKET_MODEL);
-    const started = performance.now();
-    const mesh = voxelMesh(geometry, 7000, 3);
-    let minX = Infinity;
-    let maxX = -Infinity;
-    for (let i = 0; i < mesh.nodeCount; i += 1) {
-      minX = Math.min(minX, mesh.nodes[i * 3]);
-      maxX = Math.max(maxX, mesh.nodes[i * 3]);
-    }
-    console.info(`mesh: h=${mesh.cellSize.toFixed(3)}, grid=${mesh.grid.join('x')}, elems=${mesh.elementCount}, nodes=${mesh.nodeCount}, x=[${minX},${maxX}], cad=[${geometry.bbox.min[0]},${geometry.bbox.max[0]}], voxelVolRatio=${(mesh.volumeMm3 / geometry.volumeMm3).toFixed(3)}`);
-    const solution = solveVoxelMesh(mesh, {
-      material: getMaterial('AL6061-T6'),
-      supports: BRACKET_MODEL.supports,
-      loads: BRACKET_MODEL.loads,
-      tolerance: 1e-4,
-      maxIterations: 2600,
-    });
-    const result = toAnalysisResult(solution, {
-      material: getMaterial('AL6061-T6'),
-      supports: BRACKET_MODEL.supports,
-      loads: BRACKET_MODEL.loads,
-      tolerance: 1e-4,
-      maxIterations: 2600,
-    }, {
-      modelRevision: BRACKET_MODEL.revision,
-      modelHash: geometry.watermark,
-      studyName: 'test',
-      cadVolumeMm3: geometry.volumeMm3,
-      meshMs: 0,
-    });
-    console.info(
-      `solve: ${mesh.elementCount} el, ${mesh.dofs} dof, ${solution.iterations} it, ${solution.solveMs.toFixed(0)} ms, ` +
-        `σmax=${result.maxVonMises.toFixed(1)} MPa, δmax=${result.maxDisplacement.toFixed(3)} mm, SF=${result.safetyFactor.toFixed(2)}, ` +
-        `iters=${result.solver.iterations}, relres=${result.solver.relativeResidual.toExponential(2)}, equilibrium=${result.equilibrium.relativeError.toExponential(2)}, total=${(performance.now() - started).toFixed(0)} ms`,
-    );
-    console.info('applied', result.equilibrium.applied, 'reaction', result.equilibrium.reaction, 'residual', result.equilibrium.residual);
-    expect(result.solver.converged).toBe(true);
-    expect(result.equilibrium.relativeError).toBeLessThan(1e-4);
-    expect(result.maxVonMises).toBeGreaterThan(0);
-  }, 120_000);
+  }, 60_000);
 });
 
-describe('natural language intent parsing', () => {
-  it('parses a Chinese parameter update', () => {
-    const plan = parseEngineeringPrompt('把悬臂厚度改成 16 mm，然后重新校核', BRACKET_MODEL);
-    expect(plan.actions[0].tool).toBe('set_variable');
-    expect(plan.actions[0].args.key).toBe('armThickness');
-    expect(plan.actions[0].args.value).toBe(16);
-    expect(plan.actions.some((action) => action.tool === 'run_analysis')).toBe(true);
-  });
-
-  it('parses material, load and safety target', () => {
-    const plan = parseEngineeringPrompt('材料换成 7075，末端加载 1.2 kN 向下，安全系数至少 2.5', BRACKET_MODEL);
-    expect(plan.actions.some((action) => action.tool === 'set_material')).toBe(true);
-    const load = plan.actions.find((action) => action.tool === 'set_load');
-    expect(load?.args.magnitude).toBe(1200);
-    expect(plan.actions.some((action) => action.tool === 'optimize')).toBe(true);
-  });
-
-  it('does not route freeform modeling to a preset', () => {
-    const plan = parseEngineeringPrompt('帮我建模一个 18 英寸、9辐的汽车轮辋', BRACKET_MODEL);
-    expect(plan.actions).toHaveLength(0);
-    expect(plan.intent).toBe('clarify');
+describe('binary STL transport', () => {
+  it('round-trips a closed tetrahedron through STL', async () => {
+    const positions = new Float32Array([
+      0, 0, 0,
+      10, 0, 0,
+      0, 10, 0,
+      0, 0, 10,
+    ]);
+    const indices = new Uint32Array([
+      0, 2, 1,
+      0, 1, 3,
+      0, 3, 2,
+      1, 2, 3,
+    ]);
+    const geometry: GeometryData = {
+      positions,
+      indices,
+      bbox: { min: [0, 0, 0], max: [10, 10, 10] },
+      volumeMm3: 1000 / 6,
+      areaMm2: 0,
+      triangleCount: 4,
+      vertexCount: 4,
+      buildMs: 0,
+      watermark: 'TEST-0001',
+    };
+    const buffer = await exportBinaryStl(geometry);
+    const parsed = parseBinaryStl(new Uint8Array(buffer), 'TEST-0001');
+    expect(parsed.triangleCount).toBe(4);
+    expect(parsed.bbox.max).toEqual([10, 10, 10]);
+    expect(parsed.volumeMm3).toBeCloseTo(1000 / 6, 3);
+    expect(parsed.watermark).toBe('TEST-0001');
   });
 });
 
-describe('DeepSeek tool contract', () => {
-  it('exposes the engineering tools with model-bound enums', () => {
-    const tools = buildDeepSeekTools(BRACKET_MODEL);
-    const names = tools.map((tool) => tool.function.name);
-    expect(names).toEqual(
-      expect.arrayContaining([
-        'set_material',
-        'set_load',
-        'set_support',
-        'run_analysis',
-        'explain_risk',
-        'export_report',
-        'run_build123d',
-      ]),
-    );
-    expect(directionVector('down')).toEqual([0, 0, -1]);
-    expect(directionVector('right')).toEqual([1, 0, 0]);
-  });
-});
-
-describe('project library', () => {
-  it('seeds one blank build123d workspace', () => {
+describe('blank project library', () => {
+  it('starts from one generic blank workspace', () => {
     const projects = seedProjects();
     expect(projects).toHaveLength(1);
     expect(projects[0].model.code).toBe('CAD-000');
@@ -137,81 +60,25 @@ describe('project library', () => {
     expect(projects[0].model.features).toHaveLength(0);
     expect(isModelDocument(projects[0].model)).toBe(true);
     expect(isModelDocument({ schema: 'wrong' })).toBe(false);
-    expect(nextProjectCode(projects).startsWith('CAD-')).toBe(true);
+    expect(nextProjectCode(projects)).toBe('CAD-001');
+  });
+});
+
+describe('generic modeling tool contract', () => {
+  it('exposes build123d and no preset generator', () => {
+    const tools = buildDeepSeekTools(seedProjects()[0].model);
+    const names = tools.map((tool) => tool.function.name);
+    expect(names).toContain('run_build123d');
+    expect(names).not.toContain('generate_preset');
+    expect(names).not.toContain('create_wheel_rim');
+    expect(names).not.toContain('add_solid_feature');
+    expect(directionVector('down')).toEqual([0, 0, -1]);
+    expect(directionVector('right')).toEqual([1, 0, 0]);
   });
 
-  it('creates blank projects and all three starter primitives', async () => {
-    const blank = createBlankModel('空白支架', 'TST-001');
-    expect(blank.template).toBe('empty');
-    expect(blank.variables).toHaveLength(0);
-    expect(blank.features).toHaveLength(0);
-    for (const template of ['plate', 'block', 'cylinder'] as const) {
-      const model = createStarterModel(template, blank);
-      expect(model.template).toBe(template);
-      expect(model.variables.length).toBeGreaterThan(0);
-      const { geometry } = await buildGeometry(model);
-      expect(geometry.volumeMm3).toBeGreaterThan(0);
-      expect(geometry.triangleCount).toBeGreaterThan(0);
-    }
-  }, 60_000);
-
-  it('solves a blank-project plate starter', async () => {
-    const blank = createBlankModel('空白板校核', 'TST-002');
-    const model = createStarterModel('plate', blank);
-    const { geometry } = await buildGeometry(model);
-    const mesh = voxelMesh(geometry, 3500, 3);
-    const solution = solveVoxelMesh(mesh, {
-      material: getMaterial(model.materialId),
-      supports: model.supports,
-      loads: model.loads,
-      tolerance: 1e-4,
-      maxIterations: 1200,
-    });
-    expect(solution.converged).toBe(true);
-    expect(solution.maxVonMises).toBeGreaterThan(0);
-    expect(solution.equilibrium.relativeError).toBeLessThan(1e-4);
-  }, 60_000);
-
-  it('builds the brake-pedal CSG topology', async () => {
-    const model = createBrakePedalModel();
-    expect(model.template).toBe('csg');
-    expect(model.solidFeatures?.length).toBe(16);
-    expect(model.features.length).toBe(16);
-    const { geometry, featureLog } = await buildGeometry(model);
-    expect(geometry.volumeMm3).toBeGreaterThan(0);
-    expect(geometry.triangleCount).toBeGreaterThan(100);
-    expect(geometry.bbox.max[0]).toBeGreaterThan(200);
-    expect(featureLog.length).toBe(16);
-  }, 60_000);
-
-  it('lofts a watertight wind-turbine blade', async () => {
-    const model = createWindBladeModel();
-    expect(model.template).toBe('blade');
-    expect(model.variables.length).toBe(6);
-    const { geometry, featureLog } = await buildGeometry(model);
-    expect(geometry.volumeMm3).toBeGreaterThan(0);
-    expect(geometry.triangleCount).toBeGreaterThan(400);
-    expect(geometry.bbox.max[0]).toBeCloseTo(1800, 0);
-    expect(geometry.bbox.max[1]).toBeGreaterThan(80);
-    expect(featureLog.some((entry) => entry.includes('NACA'))).toBe(true);
-  }, 60_000);
-
-  it('builds an 18-inch 9-spoke wheel rim from parameters', async () => {
-    const model = createWheelRimModel('RIM-09', '18 英寸 9 辐汽车轮辋', {
-      outerDiameterMm: 457,
-      widthMm: 203,
-      pcdMm: 114.3,
-      centerBoreMm: 72.6,
-      spokeCount: 9,
-      lugCount: 5,
-    });
-    expect(model.template).toBe('csg');
-    expect(model.solidFeatures?.filter((feature) => feature.id.startsWith('rim_spoke_')).length).toBe(9);
-    expect(model.solidFeatures?.filter((feature) => feature.id.startsWith('rim_lug_')).length).toBe(5);
-    const { geometry } = await buildGeometry(model);
-    expect(geometry.volumeMm3).toBeGreaterThan(0);
-    expect(geometry.bbox.max[0] - geometry.bbox.min[0]).toBeCloseTo(203, 0);
-    expect(geometry.bbox.max[2] - geometry.bbox.min[2]).toBeGreaterThan(470);
-    expect(geometry.bbox.max[1] - geometry.bbox.min[1]).toBeGreaterThan(470);
-  }, 60_000);
+  it('does not route freeform modeling to a local preset', () => {
+    const plan = parseEngineeringPrompt('帮我建模一个 18 英寸、9辐的汽车轮辋', seedProjects()[0].model);
+    expect(plan.actions).toHaveLength(0);
+    expect(plan.intent).toBe('clarify');
+  });
 });

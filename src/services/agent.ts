@@ -54,10 +54,7 @@ async function runLocalTurn(prompt: string): Promise<void> {
       meta: {
         kind: 'question',
         source: 'local',
-        chips:
-          plan.intent === 'help'
-            ? ['运行基线校核', '哪里最危险？', '以质量最小为目标优化悬臂厚度']
-            : ['把悬臂厚度改为 14 mm 并校核', '末端加载 1.2 kN 向下', '生成工程校核报告'],
+        chips: ['运行基线校核', '哪里最危险？', '生成工程校核报告'],
       },
     });
     return;
@@ -98,29 +95,14 @@ async function runLocalTurn(prompt: string): Promise<void> {
             : '未满足 SF ≥ 2.00，建议调整几何或材料。'
         }`
       : '';
-  const componentsAreCsg = stateNow.model.template === 'csg';
-  const componentsAreBlade = stateNow.model.template === 'blade';
-  const componentsAreWheel = componentsAreCsg && /轮辋|轮毂|rim/i.test(stateNow.model.name);
   const chips = result
-    ? componentsAreWheel
-      ? ['哪里最危险？', '生成工程校核报告', '切换为 7075-T6']
-      : componentsAreCsg
-        ? ['哪里最危险？', '生成工程校核报告', '切换为 7075-T6']
-        : componentsAreBlade
-          ? ['哪里最危险？', '生成工程校核报告', '把叶片长度改为 2200 mm']
-          : ['哪里最危险？', '以 SF ≥ 2.5 优化悬臂厚度', '生成工程校核报告']
-    : componentsAreWheel
-      ? ['运行基线校核', '哪里最危险？', '切换为 7075-T6']
-      : componentsAreCsg
-        ? ['运行基线校核', '哪里最危险？', '切换为 7075-T6']
-        : componentsAreBlade
-          ? ['运行基线校核', '哪里最危险？', '把叶片长度改为 2200 mm']
-          : ['运行基线校核', '把悬臂厚度改为 14 mm', '切换为 7075-T6'];
+    ? ['哪里最危险？', '生成工程校核报告', '切换到 7075-T6']
+    : ['运行基线校核', '哪里最危险？', '生成工程校核报告'];
   useAppStore.getState().updateMessage(messageId, {
     content: summaries.filter(Boolean).join('\n\n') + ending,
     streaming: false,
     meta: {
-      kind: failed ? 'question' : plan.actions.some((action) => action.tool === 'optimize') ? 'action' : 'insight',
+      kind: failed ? 'question' : 'insight',
       source: 'local',
       chips,
     },

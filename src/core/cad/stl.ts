@@ -83,3 +83,39 @@ export function base64ToUint8(base64: string): Uint8Array {
   for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
   return bytes;
 }
+
+export async function exportBinaryStl(geometry: GeometryData): Promise<ArrayBuffer> {
+  const triangleCount = geometry.indices.length / 3;
+  const buffer = new ArrayBuffer(84 + triangleCount * 50);
+  const view = new DataView(buffer);
+  const header = 'VISION / watertight STL export';
+  for (let i = 0; i < Math.min(header.length, 79); i += 1) view.setUint8(i, header.charCodeAt(i));
+  view.setUint32(80, triangleCount, true);
+  const p = geometry.positions;
+  const idx = geometry.indices;
+  let offset = 84;
+  for (let t = 0; t < triangleCount; t += 1) {
+    const a = idx[t * 3] * 3;
+    const b = idx[t * 3 + 1] * 3;
+    const c = idx[t * 3 + 2] * 3;
+    const ax = p[a], ay = p[a + 1], az = p[a + 2];
+    const bx = p[b], by = p[b + 1], bz = p[b + 2];
+    const cx = p[c], cy = p[c + 1], cz = p[c + 2];
+    const ux = bx - ax, uy = by - ay, uz = bz - az;
+    const vx = cx - ax, vy = cy - ay, vz = cz - az;
+    let nx = uy * vz - uz * vy;
+    let ny = uz * vx - ux * vz;
+    let nz = ux * vy - uy * vx;
+    const len = Math.hypot(nx, ny, nz) || 1;
+    nx /= len;
+    ny /= len;
+    nz /= len;
+    for (const value of [nx, ny, nz, ax, ay, az, bx, by, bz, cx, cy, cz]) {
+      view.setFloat32(offset, value, true);
+      offset += 4;
+    }
+    view.setUint16(offset, 0, true);
+    offset += 2;
+  }
+  return buffer;
+}
