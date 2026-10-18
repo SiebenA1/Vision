@@ -7,7 +7,7 @@ import { getMaterial } from '../src/core/materials';
 import { parseEngineeringPrompt } from '../src/core/agent/nlu';
 import { buildDeepSeekTools, directionVector } from '../src/core/llm/tools';
 import { isModelDocument, nextProjectCode, seedProjects } from '../src/core/projects';
-import { createBlankModel, createStarterModel } from '../src/core/templates';
+import { createBlankModel, createStarterModel, createBrakePedalModel } from '../src/core/templates';
 
 describe('parametric geometry kernel', () => {
   it('builds a watertight bracket with positive volume', async () => {
@@ -100,6 +100,13 @@ describe('natural language intent parsing', () => {
     expect(load?.args.magnitude).toBe(1200);
     expect(plan.actions.some((action) => action.tool === 'optimize')).toBe(true);
   });
+
+  it('maps a brake-pedal prompt to a CSG modeling preset', () => {
+    const plan = parseEngineeringPrompt('帮我建模一个刹车踏板支架', BRACKET_MODEL);
+    expect(plan.intent).toBe('modeling');
+    expect(plan.actions[0].tool).toBe('generate_preset');
+    expect(plan.actions[0].args.preset).toBe('brake-pedal');
+  });
 });
 
 describe('DeepSeek tool contract', () => {
@@ -116,6 +123,8 @@ describe('DeepSeek tool contract', () => {
         'optimize',
         'explain_risk',
         'export_report',
+        'generate_preset',
+        'add_solid_feature',
       ]),
     );
     const variableTool = tools.find((tool) => tool.function.name === 'set_variable')!;
@@ -129,11 +138,12 @@ describe('DeepSeek tool contract', () => {
 });
 
 describe('project library', () => {
-  it('seeds three distinct engineering projects', () => {
+  it('seeds four distinct engineering projects', () => {
     const projects = seedProjects();
-    expect(projects).toHaveLength(3);
-    expect(new Set(projects.map((project) => project.model.code)).size).toBe(3);
+    expect(projects).toHaveLength(4);
+    expect(new Set(projects.map((project) => project.model.code)).size).toBe(4);
     expect(projects.some((project) => project.model.code === 'BRK-042-L')).toBe(true);
+    expect(projects.some((project) => project.model.code === 'PEDAL-01')).toBe(true);
     expect(isModelDocument(projects[0].model)).toBe(true);
     expect(isModelDocument({ schema: 'wrong' })).toBe(false);
     expect(nextProjectCode(projects).startsWith('BRK-')).toBe(true);
@@ -169,5 +179,17 @@ describe('project library', () => {
     expect(solution.converged).toBe(true);
     expect(solution.maxVonMises).toBeGreaterThan(0);
     expect(solution.equilibrium.relativeError).toBeLessThan(1e-4);
+  }, 60_000);
+
+  it('builds the brake-pedal CSG topology', async () => {
+    const model = createBrakePedalModel();
+    expect(model.template).toBe('csg');
+    expect(model.solidFeatures?.length).toBe(16);
+    expect(model.features.length).toBe(16);
+    const { geometry, featureLog } = await buildGeometry(model);
+    expect(geometry.volumeMm3).toBeGreaterThan(0);
+    expect(geometry.triangleCount).toBeGreaterThan(100);
+    expect(geometry.bbox.max[0]).toBeGreaterThan(200);
+    expect(featureLog.length).toBe(16);
   }, 60_000);
 });

@@ -112,12 +112,128 @@ function rod(
 
 function hashDocument(model: ModelDocument): string {
   let hash = 2166136261;
-  const token = `${model.template ?? 'bracket'}|${model.variables.map((v) => `${v.key}:${v.value.toFixed(4)}`).join('|')}`;
+  const featureToken = (model.solidFeatures ?? [])
+    .map((feature) =>
+      [
+        feature.shape,
+        feature.operation,
+        feature.enabled ? 1 : 0,
+        feature.position.join(','),
+        feature.rotation.join(','),
+        feature.size.join(','),
+        feature.radius,
+        feature.height,
+        feature.axis,
+      ].join(':'),
+    )
+    .join(';');
+  const token = `${model.template ?? 'bracket'}|${featureToken}|${model.variables.map((v) => `${v.key}:${v.value.toFixed(4)}`).join('|')}`;
   for (let i = 0; i < token.length; i += 1) {
     hash ^= token.charCodeAt(i);
     hash = Math.imul(hash, 16777619);
   }
   return (hash >>> 0).toString(16).padStart(8, '0').toUpperCase();
+}
+
+async function buildCsgGeometry(
+  model: ModelDocument,
+  started: number,
+): Promise<{ geometry: GeometryData; featureLog: string[] }> {
+  const runtime = await getKernel();
+  let body: ManifoldInstance | null = null;
+  const solids: ManifoldInstance[] = [];
+  const featureLog: string[] = [];
+  const track = (solid: ManifoldInstance) => {
+    solids.push(solid);
+    return solid;
+  };
+  try {
+    for (const feature of model.solidFeatures ?? []) {
+      if (!feature.enabled) continue;
+      let shape: ManifoldInstance;
+      if (feature.shape === 'box') {
+        const base = runtime.Manifold.cube(
+          [Math.max(0.5, feature.size[0]), Math.max(0.5, feature.size[1]), Math.max(0.5, feature.size[2])],
+          true,
+        );
+        shape = base.rotate(feature.rotation[0], feature.rotation[1], feature.rotation[2]);
+        base.delete();
+      } else if (feature.shape === 'sphere') {
+        const base = runtime.Manifold.sphere(Math.max(0.5, feature.radius), 48);
+        shape = base.rotate(feature.rotation[0], feature.rotation[1], feature.rotation[2]);
+        base.delete();
+      } else {
+        const base = runtime.Manifold.cylinder(
+          Math.max(0.5, feature.height),
+          Math.max(0.5, feature.radius),
+          Math.max(0.5, feature.radius),
+          48,
+          true,
+        );
+        let oriented = base;
+        if (feature.axis === 'x') {
+          oriented = base.rotate(0, 90, 0);
+          base.delete();
+        } else if (feature.axis === 'y') {
+          oriented = base.rotate(90, 0, 0);
+          base.delete();
+        }
+        shape = oriented.rotate(feature.rotation[0], feature.rotation[1], feature.rotation[2]);
+        if (oriented !== shape) oriented.delete();
+      }
+      const placed = shape.translate(feature.position[0], feature.position[1], feature.position[2]);
+      shape.delete();
+      track(placed);
+      if (!body) {
+        if (feature.operation !== 'subtract') body = placed;
+        featureLog.push(`${feature.operation.toUpperCase()} ${feature.shape.toUpperCase()} · ${feature.name}`);
+        continue;
+      }
+      const next =
+        feature.operation === 'subtract'
+          ? body.subtract(placed)
+          : feature.operation === 'intersect'
+            ? body.intersect(placed)
+            : body.add(placed);
+      track(next);
+      body = next;
+      featureLog.push(`${feature.operation.toUpperCase()} ${feature.shape.toUpperCase()} · ${feature.name}`);
+    }
+    if (!body) throw new Error('CSG 模型没有任何实体特征。');
+    const mesh = body.getMesh();
+    const positions = new Float32Array(mesh.vertProperties);
+    const indices = new Uint32Array(mesh.triVerts);
+    const bounds = body.boundingBox();
+    const volume = body.volume();
+    if (!Number.isFinite(volume) || volume <= 0 || indices.length < 12) {
+      throw new Error('CSG 布尔结果为空或无效。');
+    }
+    return {
+      geometry: {
+        positions,
+        indices,
+        bbox: {
+          min: [bounds.min[0], bounds.min[1], bounds.min[2]],
+          max: [bounds.max[0], bounds.max[1], bounds.max[2]],
+        },
+        volumeMm3: volume,
+        areaMm2: body.surfaceArea(),
+        triangleCount: indices.length / 3,
+        vertexCount: positions.length / 3,
+        buildMs: performance.now() - started,
+        watermark: hashDocument(model),
+      },
+      featureLog,
+    };
+  } finally {
+    for (const solid of solids) {
+      try {
+        solid.delete();
+      } catch {
+        // Best-effort disposal.
+      }
+    }
+  }
 }
 
 async function buildPrimitiveGeometry(
@@ -195,6 +311,9 @@ export async function buildGeometry(model: ModelDocument): Promise<{
 }> {
   const started = performance.now();
   const template = model.template ?? 'bracket';
+  if (template === 'csg') {
+    return buildCsgGeometry(model, started);
+  }
   if (template === 'empty') {
     throw new Error('空白工程尚未添加基础体。');
   }

@@ -80,6 +80,18 @@ export default function App() {
     template: model.template ?? 'bracket',
     materialId: model.materialId,
     variables: model.variables.map((variable) => [variable.key, variable.value]),
+    solidFeatures: (model.solidFeatures ?? []).map((feature) => [
+      feature.id,
+      feature.shape,
+      feature.operation,
+      feature.enabled,
+      feature.position,
+      feature.rotation,
+      feature.size,
+      feature.radius,
+      feature.height,
+      feature.axis,
+    ]),
     loads: model.loads.map((load) => [load.face, load.magnitude, load.vector, load.enabled]),
     supports: model.supports.map((support) => [support.face, support.enabled]),
   });

@@ -2,7 +2,23 @@ export type Vec3 = [number, number, number];
 export type Axis = 'x' | 'y' | 'z';
 export type FaceId = 'x-min' | 'x-max' | 'y-min' | 'y-max' | 'z-min' | 'z-max';
 export type UnitSystem = 'mm-N-MPa';
-export type GeometryTemplate = 'bracket' | 'plate' | 'block' | 'cylinder' | 'empty';
+export type GeometryTemplate = 'bracket' | 'plate' | 'block' | 'cylinder' | 'csg' | 'empty';
+export type SolidShape = 'box' | 'cylinder' | 'sphere';
+export type SolidOperation = 'add' | 'subtract' | 'intersect';
+
+export interface SolidFeature {
+  id: string;
+  name: string;
+  shape: SolidShape;
+  operation: SolidOperation;
+  enabled: boolean;
+  position: Vec3;
+  rotation: Vec3;
+  size: Vec3;
+  radius: number;
+  height: number;
+  axis: Axis;
+}
 
 export type VariableGroup = '主控尺寸' | '连接结构' | '轻量化';
 export type VariableRole = 'primary' | 'secondary';
@@ -73,6 +89,7 @@ export interface ModelDocument {
   materialId: string;
   variables: DesignVariable[];
   features: FeatureDescriptor[];
+  solidFeatures?: SolidFeature[];
   supports: Support[];
   loads: Load[];
   mesh: MeshSettings;
@@ -270,6 +287,8 @@ export interface AgentAction {
     | 'optimize'
     | 'explain_risk'
     | 'export_report'
+    | 'generate_preset'
+    | 'add_solid_feature'
     | 'unknown';
   args: Record<string, string | number | boolean>;
   label: string;

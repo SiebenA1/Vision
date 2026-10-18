@@ -194,7 +194,9 @@ export function ProjectCenterModal({ onClose }: ProjectCenterModalProps) {
                       <span>
                         {project.model.template === 'empty'
                           ? '空白'
-                          : `${project.model.variables[0]?.value ?? '—'} mm`}
+                          : project.model.template === 'csg'
+                            ? `${project.model.solidFeatures?.length ?? 0} FEAT`
+                            : `${project.model.variables[0]?.value ?? '—'} mm`}
                       </span>
                       <span>{project.model.loads[0]?.magnitude ?? 0} N</span>
                     </div>
@@ -260,7 +262,14 @@ export function ProjectCenterModal({ onClose }: ProjectCenterModalProps) {
                   <div><span>端载</span><b>{selected.model.loads[0]?.magnitude ?? 0} N</b></div>
                   <div><span>约束</span><b>{selected.model.supports[0]?.face ?? '—'}</b></div>
                   <div><span>网格</span><b>h {selected.model.mesh.cellSizeMm ?? '—'} mm</b></div>
-                  <div><span>变量</span><b>{selected.model.variables.length}</b></div>
+                  <div>
+                    <span>{selected.model.template === 'csg' ? 'CSG 特征' : '变量'}</span>
+                    <b>
+                      {selected.model.template === 'csg'
+                        ? selected.model.solidFeatures?.length ?? 0
+                        : selected.model.variables.length}
+                    </b>
+                  </div>
                   <div><span>更新</span><b>{relativeProjectTime(selected.updatedAt)}</b></div>
                 </div>
 

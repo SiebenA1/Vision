@@ -98,9 +98,14 @@ async function runLocalTurn(prompt: string): Promise<void> {
             : '未满足 SF ≥ 2.00，建议调整几何或材料。'
         }`
       : '';
+  const componentsAreCsg = stateNow.model.template === 'csg';
   const chips = result
-    ? ['哪里最危险？', '以 SF ≥ 2.5 优化悬臂厚度', '生成工程校核报告']
-    : ['运行基线校核', '把悬臂厚度改为 14 mm', '切换为 7075-T6'];
+    ? componentsAreCsg
+      ? ['哪里最危险？', '生成工程校核报告', '切换为 7075-T6']
+      : ['哪里最危险？', '以 SF ≥ 2.5 优化悬臂厚度', '生成工程校核报告']
+    : componentsAreCsg
+      ? ['运行基线校核', '哪里最危险？', '切换为 7075-T6']
+      : ['运行基线校核', '把悬臂厚度改为 14 mm', '切换为 7075-T6'];
   useAppStore.getState().updateMessage(messageId, {
     content: summaries.filter(Boolean).join('\n\n') + ending,
     streaming: false,

@@ -193,6 +193,7 @@ export function SceneViewport({
   const containerRef = useRef<HTMLDivElement>(null);
   const contextRef = useRef<SceneContext | null>(null);
   const [cameraPreset, setCameraPreset] = useState<CameraPreset>('iso');
+  const lastModelCode = useRef(model.code);
   const dataRef = useRef({ analysis, field, deformationScale, model, material });
   dataRef.current = { analysis, field, deformationScale, model, material };
 
@@ -363,15 +364,17 @@ export function SceneViewport({
   useEffect(() => {
     const context = contextRef.current;
     if (!context || !geometry) return;
-    if (!context.lastFit) {
+    const modelChanged = lastModelCode.current !== model.code;
+    if (!context.lastFit || modelChanged) {
       fitCamera('iso');
       context.lastFit = geometry.watermark;
+      lastModelCode.current = model.code;
     } else if (autoFit && context.lastFit !== geometry.watermark) {
       fitCamera(cameraPreset);
       context.lastFit = geometry.watermark;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [geometry, autoFit]);
+  }, [geometry, autoFit, model.code]);
 
   useEffect(() => {
     const context = contextRef.current;

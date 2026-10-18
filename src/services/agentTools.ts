@@ -1,4 +1,4 @@
-import type { AgentAction, FaceId, Vec3 } from '../core/types';
+import type { AgentAction, FaceId, SolidShape, Vec3 } from '../core/types';
 import { MATERIALS, getMaterial } from '../core/materials';
 import { useAppStore } from '../state/store';
 import { runStudy, wait } from './simulation';
@@ -41,6 +41,10 @@ export function labelForAction(action: AgentAction): string {
       return '解析危险截面与失效裕度';
     case 'export_report':
       return '生成工程校核报告';
+    case 'generate_preset':
+      return '生成刹车踏板支架 CSG 模型';
+    case 'add_solid_feature':
+      return `添加 ${action.args.shape ?? '实体'} 特征`;
     default:
       return '执行工程工具';
   }
@@ -53,8 +57,15 @@ export function compactState(): Record<string, unknown> {
     model: {
       code: state.model.code,
       revision: state.model.revision,
+      template: state.model.template ?? 'bracket',
       materialId: state.model.materialId,
       variables: Object.fromEntries(state.model.variables.map((variable) => [variable.key, variable.value])),
+      solidFeatures: (state.model.solidFeatures ?? []).map((feature) => ({
+        id: feature.id,
+        name: feature.name,
+        shape: feature.shape,
+        operation: feature.operation,
+      })),
       load: state.model.loads[0]
         ? {
             magnitude: state.model.loads[0].magnitude,
@@ -107,18 +118,31 @@ export function riskNarrative(): string {
   const model = state.model;
   const wallThickness = model.variables.find((variable) => variable.key === 'wallThickness')?.value ?? 10;
   const armLength = model.variables.find((variable) => variable.key === 'armLength')?.value ?? 130;
-  let region = '悬臂中段 / 截面过渡区';
-  if (x <= wallThickness * 2.6) region = '背板与悬臂根部过渡区';
-  else if (x >= armLength * 0.8) region = '端部承力环与销孔边缘';
-  else if (Math.abs(y) > 12) region = '加强筋与悬臂腹板连接区';
   const material = getMaterial(model.materialId);
   const margin = ((material.yieldStrength - result.maxVonMises) / material.yieldStrength) * 100;
   const sfPass = result.safetyFactor >= 2.0;
   const drivers: string[] = [];
-  if (result.maxDisplacement > 1.2) drivers.push('弯曲刚度');
-  if (Math.abs(y) > 10) drivers.push('孔边/筋板的局部应力集中');
-  if (result.safetyFactor < 1.8) drivers.push('根部弯曲正应力');
-  if (drivers.length === 0) drivers.push('根部弯曲正应力与孔边应力梯度的耦合');
+  if (model.template === 'csg') {
+    let region = '叉板 / 加强筋传力路径';
+    if (x <= 18) region = '安装背板与螺栓孔区';
+    else if (x >= 185) region = '踏板垫与踏板臂端部';
+    else if (Math.hypot(x - 106, z - 72) <= 38) region = '枢轴座与叉板连接区';
+    else if (Math.abs(y) >= 30) region = '侧向叉板与横梁连接区';
+    if (result.maxDisplacement > 1.5) drivers.push('踏板臂弯曲刚度');
+    if (Math.abs(y) > 25) drivers.push('叉板面外弯曲与孔边应力集中');
+    if (result.safetyFactor < 1.8) drivers.push('枢轴座附近的弯曲/剪切耦合');
+    if (drivers.length === 0) drivers.push('安装孔边与叉板根部的应力梯度');
+    return [
+      `热点位于 **${region}**，坐标 (${fmt(x, 1)}, ${fmt(y, 1)}, ${fmt(z, 1)}) mm。`,
+      `峰值 von Mises **${fmt(result.maxVonMises, 1)} MPa**，对应安全系数 **${fmt(result.safetyFactor, 2)}**；距屈服点仍有 ${fmt(margin, 1)}% 的材料裕度。`,
+      `当前控制因素：${drivers.join('、')}。${sfPass ? '结构满足当前 SF ≥ 2.00 的设计目标；仍需校核安装螺栓预紧、焊缝与疲劳。' : '结构未满足 SF ≥ 2.00，建议优先加厚叉板/枢轴座或增加根部加强筋。'}`,
+      result.warnings.length ? `自动检查提示：${result.warnings[0]}` : '自动检查未发现平衡或收敛异常。',
+    ].join('\n\n');
+  }
+  let region = '悬臂中段 / 截面过渡区';
+  if (x <= wallThickness * 2.6) region = '背板与悬臂根部过渡区';
+  else if (x >= armLength * 0.8) region = '端部承力环与销孔边缘';
+  else if (Math.abs(y) > 12) region = '加强筋与悬臂腹板连接区';
   return [
     `热点位于 **${region}**，坐标 (${fmt(x, 1)}, ${fmt(y, 1)}, ${fmt(z, 1)}) mm。`,
     `峰值 von Mises **${fmt(result.maxVonMises, 1)} MPa**，对应安全系数 **${fmt(result.safetyFactor, 2)}**；距屈服点仍有 ${fmt(margin, 1)}% 的材料裕度。`,
@@ -162,6 +186,14 @@ function actionResultSummary(action: AgentAction): string {
   if (action.tool === 'explain_risk') {
     return riskNarrative();
   }
+  if (action.tool === 'generate_preset') {
+    const model = useAppStore.getState().model;
+    return `已生成 **${model.code} · ${model.name}**。CSG 特征图包含 **${model.solidFeatures?.length ?? 0} 个特征**（安装背板、叉板、加强筋、枢轴座、踏板臂及减重/安装孔），watertight 几何已重建。\n\n下一步可以运行基线校核，或继续添加/切除实体特征。`;
+  }
+  if (action.tool === 'add_solid_feature') {
+    const model = useAppStore.getState().model;
+    return `已添加 **${action.args.shape}** 特征（${action.args.operation === 'subtract' ? '切除' : '添加'}）。当前 CSG 特征数 **${model.solidFeatures?.length ?? 0}**，几何已重建。`;
+  }
   return '';
 }
 
@@ -169,7 +201,42 @@ export async function executeTool(action: AgentAction, lastResultRef: LastResult
   const store = useAppStore.getState();
   let detail = '';
   let summary = '';
-  if (action.tool === 'set_variable') {
+  if (action.tool === 'generate_preset') {
+    store.createBrakePedalProject(true);
+    await wait(60);
+    const geometry = await useAppStore.getState().rebuildGeometry();
+    if (!geometry) throw new Error(useAppStore.getState().geometryError ?? 'CSG 几何重建失败');
+    detail = `${useAppStore.getState().model.solidFeatures?.length ?? 0} CSG features · watertight`;
+    summary = actionResultSummary(action);
+    lastResultRef.value = null;
+  } else if (action.tool === 'add_solid_feature') {
+    if ((useAppStore.getState().model.template ?? 'bracket') !== 'csg') {
+      throw new Error('当前项目不是 CSG 特征模型；请先生成 brake-pedal 预设。');
+    }
+    const shape = String(action.args.shape ?? 'box') as SolidShape;
+    if (!['box', 'cylinder', 'sphere'].includes(shape)) throw new Error(`无效实体类型：${shape}`);
+    const operation = action.args.operation === 'subtract' ? 'subtract' : 'add';
+    const numberArg = (key: string, fallback: number) => {
+      const value = Number(action.args[key]);
+      return Number.isFinite(value) ? value : fallback;
+    };
+    const axis = String(action.args.axis ?? 'z');
+    if (!['x', 'y', 'z'].includes(axis)) throw new Error(`无效圆柱轴：${axis}`);
+    store.addSolidFeature(shape, operation, {
+      position: [numberArg('x', 65), numberArg('y', 0), numberArg('z', 45)],
+      size: [numberArg('sx', 40), numberArg('sy', 30), numberArg('sz', 20)],
+      radius: numberArg('radius', 15),
+      height: numberArg('height', 40),
+      axis: axis as 'x' | 'y' | 'z',
+      rotation: [numberArg('rx', 0), numberArg('ry', 0), numberArg('rz', 0)],
+    });
+    await wait(40);
+    const geometry = await useAppStore.getState().rebuildGeometry();
+    if (!geometry) throw new Error(useAppStore.getState().geometryError ?? 'CSG 几何重建失败');
+    detail = `${shape} ${operation} · watertight`;
+    summary = actionResultSummary(action);
+    lastResultRef.value = null;
+  } else if (action.tool === 'set_variable') {
     const variable = useAppStore
       .getState()
       .model.variables.find((item) => item.key === action.args.key);

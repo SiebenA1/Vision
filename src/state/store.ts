@@ -9,6 +9,8 @@ import type {
   ModelDocument,
   OptimizationResult,
   ProjectRecord,
+  SolidFeature,
+  SolidShape,
   ToastMessage,
   ValidationResult,
   WorkspaceId,
@@ -22,7 +24,7 @@ import {
   nextProjectCode,
   persistProjectLibrary,
 } from '../core/projects';
-import { createBlankModel, createStarterModel } from '../core/templates';
+import { createBlankModel, createStarterModel, createBrakePedalModel, csgFeatures } from '../core/templates';
 import { getMaterial, massFromVolume, type MaterialSpec } from '../core/materials';
 import { buildGeometry } from '../core/geometry/kernel';
 import type { OptimizerProgress } from '../core/optimization/optimizer';
@@ -88,10 +90,18 @@ interface AppState {
   setBuilding: (building: boolean) => void;
 
   syncProject: () => void;
-  switchProject: (id: string) => void;
+  switchProject: (id: string, preserveChat?: boolean) => void;
   createProject: (name: string, code: string) => boolean;
   createBlankProject: (name: string, code: string) => boolean;
+  createBrakePedalProject: (preserveChat?: boolean) => void;
   initializeStarter: (template: 'plate' | 'block' | 'cylinder') => void;
+  addSolidFeature: (
+    shape: SolidShape,
+    operation: 'add' | 'subtract',
+    overrides?: Partial<Omit<SolidFeature, 'id' | 'shape' | 'operation'>>,
+  ) => void;
+  updateSolidFeature: (id: string, patch: Partial<SolidFeature>) => void;
+  deleteSolidFeature: (id: string) => void;
   duplicateProject: (id: string) => void;
   deleteProject: (id: string) => void;
   renameProject: (id: string, name: string, code: string) => void;
@@ -172,11 +182,15 @@ function chatSeedFor(model: ModelDocument): ChatMessage[] {
   const template = model.template ?? 'bracket';
   const blank = template === 'empty';
   const starter = template === 'plate' || template === 'block' || template === 'cylinder';
+  const csg = template === 'csg';
+  const solidCount = model.solidFeatures?.length ?? 0;
   const content = blank
     ? `${model.code} · ${model.name} 空白工程已创建。当前没有几何体。\n\n请在左侧选择 **基础板 / 基础块 / 圆柱体**，设置材料、边界条件与载荷，然后运行第一次静力校核。`
-    : starter
-      ? `${model.code} · ${model.name} 已载入。基础体 ${model.variables.map((variable) => `${variable.label} ${variable.value} mm`).join(' · ')}；材料 ${getMaterial(model.materialId).shortName}，顶面载荷 ${model.loads[0]?.magnitude ?? 0} N。\n\n下一步：运行基线校核，或继续在参数面板中调整几何。`
-      : `${model.code} · ${model.name} 已载入。${model.variables.length} 个参数化变量、${getMaterial(model.materialId).shortName} 材料与 ${model.loads[0]?.magnitude ?? 0} N 端载边界条件已同步。\n\n我建议先做一次基线校核，再以质量最小为目标搜索悬臂厚度。你也可以直接用自然语言改变几何、载荷或材料。`;
+    : csg
+      ? `${model.code} · ${model.name} 已载入。CSG 特征图包含 **${solidCount} 个实体/切除特征**，材料 ${getMaterial(model.materialId).shortName}，固定 ${model.supports[0]?.face ?? '—'}，载荷 ${model.loads[0]?.face ?? '—'} · ${model.loads[0]?.magnitude ?? 0} N。\n\n可运行基线校核、追问危险区域，或继续叠加特征。`
+      : starter
+        ? `${model.code} · ${model.name} 已载入。基础体 ${model.variables.map((variable) => `${variable.label} ${variable.value} mm`).join(' · ')}；材料 ${getMaterial(model.materialId).shortName}，顶面载荷 ${model.loads[0]?.magnitude ?? 0} N。\n\n下一步：运行基线校核，或继续在参数面板中调整几何。`
+        : `${model.code} · ${model.name} 已载入。${model.variables.length} 个参数化变量、${getMaterial(model.materialId).shortName} 材料与 ${model.loads[0]?.magnitude ?? 0} N 端载边界条件已同步。\n\n我建议先做一次基线校核，再以质量最小为目标搜索悬臂厚度。你也可以直接用自然语言改变几何、载荷或材料。`;
   return [
     {
       id: `msg_seed_${Date.now().toString(36)}`,
@@ -185,7 +199,7 @@ function chatSeedFor(model: ModelDocument): ChatMessage[] {
       createdAt: Date.now() - 42_000,
       meta: {
         kind: 'insight',
-        chips: blank ? [] : ['基线校核', '轻量化优化', '哪里最危险？'],
+        chips: blank ? [] : csg ? ['应力集中在哪？', '检查结构风险', '继续加特征'] : ['基线校核', '轻量化优化', '哪里最危险？'],
       },
     },
   ];
@@ -331,7 +345,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
     persistProjectLibrary(projects, state.activeProjectId);
   },
 
-  switchProject: (id) => {
+  switchProject: (id, preserveChat = false) => {
     const state = get();
     if (id === state.activeProjectId) return;
     const now = new Date().toISOString();
@@ -348,12 +362,16 @@ export const useAppStore = create<AppState>()((set, get) => ({
       model,
       projects: withCurrent,
       activeProjectId: target.id,
-      selectedFeatureId: model.features.find((feature) => feature.id === 'arm')?.id ?? model.features[0]?.id ?? 'base',
+      selectedFeatureId:
+        model.solidFeatures?.[0]?.id ??
+        model.features.find((feature) => feature.id === 'arm')?.id ??
+        model.features[0]?.id ??
+        'base',
       selectedVariableKey:
         model.variables.find((variable) => variable.key === 'armThickness')?.key ??
         model.variables[0]?.key ??
         '',
-      chat: chatSeedFor(model),
+      chat: preserveChat ? state.chat.slice(-2) : chatSeedFor(model),
     });
     persistProjectLibrary(withCurrent, target.id);
     window.setTimeout(() => {
@@ -428,6 +446,85 @@ export const useAppStore = create<AppState>()((set, get) => ({
     }, 0);
   },
 
+  createBrakePedalProject: (preserveChat = false) => {
+    const state = get();
+    let index = 1;
+    const codes = new Set(state.projects.map((project) => project.model.code));
+    while (codes.has(`PEDAL-${String(index).padStart(2, '0')}`)) index += 1;
+    const code = `PEDAL-${String(index).padStart(2, '0')}`;
+    const model = createBrakePedalModel(code, '刹车踏板支架');
+    const record = makeProjectRecord(model);
+    set({ projects: [...state.projects, record] });
+    get().switchProject(record.id, preserveChat);
+  },
+
+  addSolidFeature: (shape, operation, overrides) => {
+    const state = get();
+    if ((state.model.template ?? 'bracket') !== 'csg') return;
+    const current = state.model.solidFeatures ?? [];
+    const index = current.length + 1;
+    const shapeName = shape === 'box' ? '方块' : shape === 'cylinder' ? '圆柱' : '球体';
+    const feature: SolidFeature = {
+      id: `sf_${Date.now().toString(36)}_${index}`,
+      name: `${operation === 'subtract' ? '切除' : ''}${shapeName} ${index}`,
+      shape,
+      operation,
+      enabled: true,
+      position: [65, 0, 45],
+      rotation: [0, 0, 0],
+      size: [40, 30, 20],
+      radius: shape === 'sphere' ? 18 : 15,
+      height: 40,
+      axis: 'z',
+      ...overrides,
+    };
+    const solidFeatures = [...current, feature];
+    const model = cloneModel(state.model);
+    model.solidFeatures = solidFeatures;
+    model.features = csgFeatures(solidFeatures);
+    state.history.push({ model: cloneModel(state.model), label: `${feature.name} · ${operation === 'subtract' ? '切除' : '添加'}` });
+    set({
+      model,
+      history: [...state.history],
+      future: [],
+      selectedFeatureId: feature.id,
+    });
+  },
+
+  updateSolidFeature: (id, patch) => {
+    const state = get();
+    const current = state.model.solidFeatures ?? [];
+    if (!current.some((feature) => feature.id === id)) return;
+    const solidFeatures = current.map((feature) =>
+      feature.id === id ? { ...feature, ...patch, id: feature.id } : feature,
+    );
+    const model = cloneModel(state.model);
+    model.solidFeatures = solidFeatures;
+    model.features = csgFeatures(solidFeatures);
+    set({ model, selectedFeatureId: id });
+  },
+
+  deleteSolidFeature: (id) => {
+    const state = get();
+    const current = state.model.solidFeatures ?? [];
+    if (current.length <= 1) {
+      get().addToast({ title: '至少保留一个 CSG 特征', tone: 'warning' });
+      return;
+    }
+    const solidFeatures = current.filter((feature) => feature.id !== id);
+    const model = cloneModel(state.model);
+    model.solidFeatures = solidFeatures;
+    model.features = csgFeatures(solidFeatures);
+    state.history.push({ model: cloneModel(state.model), label: '删除 CSG 特征' });
+    set({
+      model,
+      history: [...state.history],
+      future: [],
+      selectedFeatureId:
+        state.selectedFeatureId === id ? solidFeatures[0]?.id ?? '' : state.selectedFeatureId,
+    });
+  },
+
   duplicateProject: (id) => {
     const state = get();
     const source = state.projects.find((project) => project.id === id);
@@ -470,7 +567,11 @@ export const useAppStore = create<AppState>()((set, get) => ({
       model,
       projects: remaining,
       activeProjectId: fallback.id,
-      selectedFeatureId: model.features.find((feature) => feature.id === 'arm')?.id ?? model.features[0]?.id ?? 'base',
+      selectedFeatureId:
+        model.solidFeatures?.[0]?.id ??
+        model.features.find((feature) => feature.id === 'arm')?.id ??
+        model.features[0]?.id ??
+        'base',
       selectedVariableKey:
         model.variables.find((variable) => variable.key === 'armThickness')?.key ??
         model.variables[0]?.key ??

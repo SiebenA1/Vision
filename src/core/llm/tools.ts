@@ -206,6 +206,68 @@ export function buildDeepSeekTools(model: ModelDocument): DeepSeekTool[] {
         },
       },
     },
+    {
+      type: 'function',
+      function: {
+        name: 'generate_preset',
+        description:
+          '生成一个完整的多特征工程模型并作为新项目打开。brake-pedal 生成刹车踏板支架：安装背板、双侧叉板、加强筋、枢轴座、踏板臂、安装孔与减重孔。需要复杂拓扑而非只改现有参数时使用。',
+        parameters: {
+          type: 'object',
+          properties: {
+            preset: {
+              type: 'string',
+              enum: ['brake-pedal'],
+              description: 'Engineering preset id.',
+            },
+            reason: {
+              type: 'string',
+              description: 'Short engineering reason.',
+            },
+          },
+          required: ['preset'],
+          additionalProperties: false,
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'add_solid_feature',
+        description:
+          '向当前 CSG 特征图追加一个实体或切除特征，并重建 watertight 几何。只能用于 CSG 模型；若不是 CSG 模型，先调用 generate_preset。坐标系为 mm，Z 向上。',
+        parameters: {
+          type: 'object',
+          properties: {
+            shape: {
+              type: 'string',
+              enum: ['box', 'cylinder', 'sphere'],
+              description: 'Primitive type.',
+            },
+            operation: {
+              type: 'string',
+              enum: ['add', 'subtract'],
+              description: 'Boolean union or difference.',
+            },
+            x: { type: 'number', description: 'Center X in mm.' },
+            y: { type: 'number', description: 'Center Y in mm.' },
+            z: { type: 'number', description: 'Center Z in mm.' },
+            sx: { type: 'number', description: 'Box size X in mm.' },
+            sy: { type: 'number', description: 'Box size Y in mm.' },
+            sz: { type: 'number', description: 'Box size Z in mm.' },
+            radius: { type: 'number', description: 'Cylinder/sphere radius in mm.' },
+            height: { type: 'number', description: 'Cylinder height in mm.' },
+            axis: { type: 'string', enum: ['x', 'y', 'z'], description: 'Cylinder axis.' },
+            rx: { type: 'number', description: 'Rotation about X in degrees.' },
+            ry: { type: 'number', description: 'Rotation about Y in degrees.' },
+            rz: { type: 'number', description: 'Rotation about Z in degrees.' },
+            reason: { type: 'string', description: 'Short engineering reason.' },
+          },
+          required: ['shape', 'operation'],
+          additionalProperties: false,
+        },
+      },
+    },
   ];
 }
 
@@ -222,6 +284,7 @@ export function buildModelContext(
       code: model.code,
       name: model.name,
       revision: model.revision,
+      template: model.template ?? 'bracket',
       units: model.units,
       discipline: model.meta.discipline,
       designIntent: model.meta.designIntent,
@@ -244,6 +307,18 @@ export function buildModelContext(
       step: variable.step,
       unit: variable.unit,
       group: variable.group,
+    })),
+    solidFeatures: (model.solidFeatures ?? []).map((feature) => ({
+      id: feature.id,
+      name: feature.name,
+      shape: feature.shape,
+      operation: feature.operation,
+      position: feature.position,
+      rotation: feature.rotation,
+      size: feature.size,
+      radius: feature.radius,
+      height: feature.height,
+      axis: feature.axis,
     })),
     supports: model.supports.map((support) => ({
       name: support.name,
@@ -313,6 +388,8 @@ export function buildModelContext(
       'optimize',
       'explain_risk',
       'export_report',
+      'generate_preset',
+      'add_solid_feature',
     ],
   };
 }

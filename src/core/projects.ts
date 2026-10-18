@@ -1,5 +1,6 @@
 import type { ModelDocument, ProjectRecord } from './types';
 import { BRACKET_MODEL, cloneModel } from './presets';
+import { createBrakePedalModel } from './templates';
 
 const STORAGE_KEY = 'vision.project.library.v1';
 const ACTIVE_KEY = 'vision.project.active.v1';
@@ -93,6 +94,15 @@ function lightweightProject(): ProjectRecord {
   };
 }
 
+function brakePedalProject(): ProjectRecord {
+  return {
+    id: 'prj_pedal_01',
+    model: createBrakePedalModel('PEDAL-01', '刹车踏板支架'),
+    createdAt: '2026-10-16T08:30:00.000Z',
+    updatedAt: '2026-10-18T05:20:00.000Z',
+  };
+}
+
 export function seedProjects(): ProjectRecord[] {
   return [
     {
@@ -103,6 +113,7 @@ export function seedProjects(): ProjectRecord[] {
     },
     heavyProject(),
     lightweightProject(),
+    brakePedalProject(),
   ];
 }
 
@@ -122,6 +133,9 @@ export function loadProjectLibrary(): ProjectLibraryState {
     const parsed = JSON.parse(raw) as unknown;
     const projects = Array.isArray(parsed) ? parsed.filter(isProjectRecord).map(cloneRecord) : [];
     if (projects.length === 0) return { projects: fallback, activeProjectId: fallback[0].id };
+    if (!projects.some((project) => project.model.code === 'PEDAL-01')) {
+      projects.push(brakePedalProject());
+    }
     const storedActive = localStorage.getItem(ACTIVE_KEY);
     const activeProjectId = projects.some((project) => project.id === storedActive)
       ? String(storedActive)

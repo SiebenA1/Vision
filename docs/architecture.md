@@ -101,6 +101,39 @@ The model panel and the empty viewport offer three parameterized starters:
 
 The blank state does not auto-inherit the previous project's geometry or results; browser tests assert the old mesh is cleared.
 
+### 3.3 CSG feature graph and natural-language modeling
+
+For non-bracket topology the model can use `template: 'csg'` with:
+
+```ts
+interface SolidFeature {
+  id: string;
+  shape: 'box' | 'cylinder' | 'sphere';
+  operation: 'add' | 'subtract' | 'intersect';
+  position: Vec3;
+  rotation: Vec3;  // degrees
+  size: Vec3;      // box
+  radius: number;  // cylinder / sphere
+  height: number;  // cylinder
+  axis: 'x' | 'y' | 'z';
+  enabled: boolean;
+}
+```
+
+`buildCsgGeometry()` evaluates features in order:
+
+1. build the primitive at the origin;
+2. orient the cylinder to its axis;
+3. apply Euler rotation;
+4. translate to its center;
+5. apply union, difference or intersection to the running body.
+
+All intermediate solids are tracked and disposed. The mesh, bounding box, volume, area and hash are produced from the final Manifold body. The hash includes template, variables and every CSG feature parameter, so any transform or boolean change invalidates old FE results.
+
+The brake-pedal preset (`createBrakePedalModel`) is a 16-feature graph: wall plate, four bolt holes, two side cheeks, lower cross brace, two gussets, pivot boss and bore, two lightening holes, pedal lever and pedal pad. A natural-language prompt maps to `generate_preset`; the local planner handles the brake-pedal phrase, while DeepSeek can also call `generate_preset` and `add_solid_feature`.
+
+The feature builder UI edits the same graph. It is deliberately CSG, not a NURBS B-Rep sketcher: there are no sketch constraints, lofts, sweeps, fillets or assemblies yet. The app labels this boundary in the README and UI rather than presenting the result as a production CAD kernel.
+
 ## 4. Geometry build
 
 `src/core/geometry/kernel.ts`

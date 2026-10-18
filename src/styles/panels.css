@@ -1364,6 +1364,162 @@
 
 /* ── Blank project starter ───────────────────────────────── */
 
+/* ── CSG feature builder ─────────────────────────────────── */
+
+.csg-builder {
+  margin: 0 12px 10px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: #f7f4ea;
+}
+
+.csg-builder__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.csg-builder__head .chip {
+  font-size: 6.5px;
+}
+
+.csg-builder__add {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr 1fr;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.csg-builder__add button {
+  height: 25px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: #fdfbf5;
+  color: var(--ink-soft);
+  font-size: 8px;
+  font-weight: 600;
+}
+
+.csg-builder__add button:hover {
+  border-color: var(--line-strong);
+  background: #fff;
+}
+
+.csg-builder__add button.is-cut {
+  color: var(--bad);
+}
+
+.csg-inspector {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--line);
+}
+
+.csg-inspector__title {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.csg-inspector__title .input {
+  height: 24px;
+  flex: 1;
+  font-size: 9px;
+}
+
+.csg-inspector__title > span {
+  flex: 0 0 auto;
+  padding: 2px 4px;
+  border: 1px solid rgba(29, 127, 86, 0.25);
+  border-radius: 2px;
+  background: var(--good-soft);
+  color: var(--good);
+  font-family: var(--font-mono);
+  font-size: 6px;
+}
+
+.csg-inspector__title > span.is-cut {
+  border-color: rgba(185, 62, 43, 0.25);
+  background: var(--bad-soft);
+  color: var(--bad);
+}
+
+.csg-field-group {
+  margin-top: 6px;
+}
+
+.csg-field-group > span {
+  display: block;
+  margin-bottom: 3px;
+  font-family: var(--font-mono);
+  font-size: 6px;
+  letter-spacing: 0.06em;
+  color: var(--muted-2);
+}
+
+.csg-field-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 3px;
+}
+
+.csg-field-grid .input {
+  height: 23px;
+  padding: 0 4px;
+  font-family: var(--font-mono);
+  font-size: 8px;
+}
+
+.csg-inspector__actions {
+  display: flex;
+  gap: 4px;
+  margin-top: 7px;
+}
+
+.csg-inspector__actions button {
+  height: 23px;
+  padding: 0 7px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: #fdfbf5;
+  color: var(--muted);
+  font-size: 7.5px;
+}
+
+.csg-inspector__actions button.is-active {
+  border-color: rgba(29, 127, 86, 0.3);
+  background: var(--good-soft);
+  color: var(--good);
+}
+
+.csg-inspector__actions button.is-active.is-cut {
+  border-color: rgba(185, 62, 43, 0.3);
+  background: var(--bad-soft);
+  color: var(--bad);
+}
+
+.csg-inspector__actions .csg-delete {
+  margin-left: auto;
+  color: var(--bad);
+}
+
+.csg-builder__hint {
+  display: flex;
+  gap: 5px;
+  margin-top: 8px;
+  padding-top: 7px;
+  border-top: 1px dashed var(--line);
+  font-size: 7.5px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
 .blank-starter {
   padding: 15px 14px 4px;
 }

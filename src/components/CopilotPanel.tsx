@@ -150,6 +150,7 @@ function Message({ message, onChip, busy }: { message: ChatMessage; onChip: (tex
 }
 
 const SUGGESTIONS = [
+  { label: '刹车踏板支架', prompt: '帮我建模一个刹车踏板支架，包含安装背板、双侧叉板、枢轴座和踏板臂。' },
   { label: '基线校核', prompt: '运行一次基线校核，并解释最大应力出现的位置。' },
   { label: '轻量化优化', prompt: '以质量最小为目标，安全系数不低于 2.0，位移不超过 2.0 mm，优化悬臂厚度。' },
   { label: '提高载荷', prompt: '把端部载荷提高到 1200 N，然后重新校核。' },
@@ -175,6 +176,10 @@ export function CopilotPanel({ onSend }: CopilotPanelProps) {
   const llmError = configured && llmConnectionStatus === 'error';
   const modelLabel = configured ? llmModelLabel(llmSettings) : 'LOCAL PLANNER';
   const isBlankProject = (model.template ?? 'bracket') === 'empty';
+  const isCsgProject = model.template === 'csg';
+  const visibleSuggestions = isCsgProject
+    ? SUGGESTIONS.filter((suggestion) => !suggestion.label.includes('优化') && suggestion.label !== '刹车踏板支架')
+    : SUGGESTIONS;
   const streamingDeepSeek = busy && agentSource === 'deepseek';
   const [draft, setDraft] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -282,7 +287,7 @@ export function CopilotPanel({ onSend }: CopilotPanelProps) {
               </button>
             )}
             <span className="eyebrow">NEXT ACTION</span>
-            {SUGGESTIONS.map((suggestion) => (
+            {visibleSuggestions.map((suggestion) => (
               <button key={suggestion.label} type="button" onClick={() => onSend(suggestion.prompt)} disabled={busy}>
                 <span>{suggestion.label}</span>
                 <ArrowUp size={12} />

@@ -3,6 +3,7 @@ import type {
   FeatureDescriptor,
   GeometryTemplate,
   ModelDocument,
+  SolidFeature,
 } from './types';
 import { BRACKET_MODEL, cloneModel } from './presets';
 
@@ -178,4 +179,153 @@ export function createStarterModel(template: StarterTemplate, base: ModelDocumen
 
 export function isStarterTemplate(value: string): value is StarterTemplate {
   return value === 'plate' || value === 'block' || value === 'cylinder';
+}
+
+export function describeSolidFeature(feature: SolidFeature, index: number): FeatureDescriptor {
+  const dimensions =
+    feature.shape === 'box'
+      ? `${feature.size[0]} × ${feature.size[1]} × ${feature.size[2]}`
+      : feature.shape === 'cylinder'
+        ? `Ø${feature.radius * 2} × ${feature.height}${feature.axis.toUpperCase()}`
+        : `Ø${feature.radius * 2}`;
+  return {
+    id: feature.id,
+    index: String(index + 1).padStart(2, '0'),
+    name: feature.name,
+    nameEn: feature.shape.toUpperCase(),
+    kind: feature.operation === 'subtract' ? 'cut' : 'solid',
+    operation: feature.operation === 'subtract' ? 'subtract' : 'add',
+    description: `${feature.shape.toUpperCase()} · ${dimensions}`,
+    variableKeys: [],
+    quality: 'primary',
+  };
+}
+
+export function csgFeatures(features: SolidFeature[]): FeatureDescriptor[] {
+  return features.map(describeSolidFeature);
+}
+
+function solid(
+  id: string,
+  name: string,
+  shape: SolidFeature['shape'],
+  operation: SolidFeature['operation'],
+  position: SolidFeature['position'],
+  options: Partial<SolidFeature> = {},
+): SolidFeature {
+  return {
+    id,
+    name,
+    shape,
+    operation,
+    enabled: true,
+    position,
+    rotation: [0, 0, 0],
+    size: [30, 30, 30],
+    radius: 15,
+    height: 30,
+    axis: 'z',
+    ...options,
+  };
+}
+
+/**
+ * A brake-pedal bracket assembled from a CSG feature graph:
+ * wall plate → side cheeks → gussets → pivot boss → pedal lever → subtractive holes.
+ */
+export function createBrakePedalModel(code = 'PEDAL-01', name = '刹车踏板支架'): ModelDocument {
+  const features: SolidFeature[] = [
+    solid('pedal_wall', '安装背板', 'box', 'add', [6, 0, 45], { size: [12, 130, 90] }),
+    solid('pedal_hole_1', '安装孔 01', 'cylinder', 'subtract', [6, -48, 18], {
+      radius: 5.5,
+      height: 22,
+      axis: 'x',
+    }),
+    solid('pedal_hole_2', '安装孔 02', 'cylinder', 'subtract', [6, 48, 18], {
+      radius: 5.5,
+      height: 22,
+      axis: 'x',
+    }),
+    solid('pedal_hole_3', '安装孔 03', 'cylinder', 'subtract', [6, -48, 72], {
+      radius: 5.5,
+      height: 22,
+      axis: 'x',
+    }),
+    solid('pedal_hole_4', '安装孔 04', 'cylinder', 'subtract', [6, 48, 72], {
+      radius: 5.5,
+      height: 22,
+      axis: 'x',
+    }),
+    solid('pedal_cheek_l', '左侧叉板', 'box', 'add', [62, -38, 55], { size: [112, 9, 58] }),
+    solid('pedal_cheek_r', '右侧叉板', 'box', 'add', [62, 38, 55], { size: [112, 9, 58] }),
+    solid('pedal_brace', '下横梁', 'box', 'add', [54, 0, 36], { size: [14, 68, 10] }),
+    solid('pedal_gusset_l', '左加强筋', 'box', 'add', [32, -38, 28], {
+      size: [54, 8, 10],
+      rotation: [0, -42, 0],
+    }),
+    solid('pedal_gusset_r', '右加强筋', 'box', 'add', [32, 38, 28], {
+      size: [54, 8, 10],
+      rotation: [0, -42, 0],
+    }),
+    solid('pedal_boss', '枢轴座', 'cylinder', 'add', [106, 0, 72], { radius: 24, height: 92, axis: 'y' }),
+    solid('pedal_bore', '枢轴孔', 'cylinder', 'subtract', [106, 0, 72], {
+      radius: 13,
+      height: 104,
+      axis: 'y',
+    }),
+    solid('pedal_light_l', '左侧减重孔', 'cylinder', 'subtract', [58, -38, 55], {
+      radius: 14,
+      height: 24,
+      axis: 'y',
+    }),
+    solid('pedal_light_r', '右侧减重孔', 'cylinder', 'subtract', [58, 38, 55], {
+      radius: 14,
+      height: 24,
+      axis: 'y',
+    }),
+    solid('pedal_lever', '踏板臂', 'box', 'add', [162, 0, 52], {
+      size: [118, 20, 16],
+      rotation: [0, 22, 0],
+    }),
+    solid('pedal_pad', '踏板垫', 'box', 'add', [216, 0, 29], {
+      size: [28, 48, 10],
+      rotation: [0, 22, 0],
+    }),
+  ];
+  const model = cloneModel(BRACKET_MODEL);
+  model.id = `mdl_${Date.now().toString(36)}`;
+  model.code = code;
+  model.name = name;
+  model.subtitle = 'Brake pedal bracket / CSG feature graph';
+  model.revision = 'R01';
+  model.template = 'csg';
+  model.variables = [];
+  model.features = csgFeatures(features);
+  model.solidFeatures = features;
+  model.supports = [
+    {
+      id: 'sup_wall',
+      name: '安装面固定',
+      face: 'x-min',
+      type: 'fixed',
+      enabled: true,
+    },
+  ];
+  model.loads = [
+    {
+      id: 'load_pedal',
+      name: '踏板端部载荷',
+      face: 'x-max',
+      vector: [0, 0, -1],
+      magnitude: 500,
+      enabled: true,
+      description: '刹车踏板端部 · 500 N 下压',
+    },
+  ];
+  model.mesh = { ...model.mesh, cellSizeMm: 4 };
+  model.meta.created = new Date().toISOString().slice(0, 10);
+  model.meta.client = 'VISION Brake Systems';
+  model.meta.designIntent =
+    '刹车踏板支架：后安装板固定，双侧叉板承载枢轴，踏板臂将 500 N 脚部载荷传至枢轴座。重点校核安装孔、叉板焊缝区与枢轴座。';
+  return model;
 }

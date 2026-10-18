@@ -155,6 +155,151 @@ function BlankStarter() {
   );
 }
 
+function CsgBuilder() {
+  const model = useAppStore((state) => state.model);
+  const selectedId = useAppStore((state) => state.selectedFeatureId);
+  const addSolidFeature = useAppStore((state) => state.addSolidFeature);
+  const updateSolidFeature = useAppStore((state) => state.updateSolidFeature);
+  const deleteSolidFeature = useAppStore((state) => state.deleteSolidFeature);
+  const features = model.solidFeatures ?? [];
+  const selected = features.find((feature) => feature.id === selectedId) ?? features[0];
+
+  const number = (value: number, patch: (next: number) => void) => (
+    <input
+      className="input"
+      type="number"
+      value={Number.isFinite(value) ? value : 0}
+      onChange={(event) => patch(Number(event.target.value) || 0)}
+    />
+  );
+
+  return (
+    <div className="csg-builder">
+      <div className="csg-builder__head">
+        <span className="eyebrow">FEATURE BUILDER / CSG</span>
+        <span className="chip">{features.length} SOLIDS</span>
+      </div>
+      <div className="csg-builder__add">
+        <button type="button" onClick={() => addSolidFeature('box', 'add')}><Plus size={11} /> 方块</button>
+        <button type="button" onClick={() => addSolidFeature('cylinder', 'add')}><Plus size={11} /> 圆柱</button>
+        <button type="button" onClick={() => addSolidFeature('sphere', 'add')}><Plus size={11} /> 球体</button>
+        <button type="button" className="is-cut" onClick={() => addSolidFeature('cylinder', 'subtract')}>
+          <Minus size={11} /> 切除
+        </button>
+      </div>
+      {selected && (
+        <div className="csg-inspector">
+          <div className="csg-inspector__title">
+            <input
+              className="input"
+              value={selected.name}
+              onChange={(event) => updateSolidFeature(selected.id, { name: event.target.value })}
+            />
+            <span className={selected.operation === 'subtract' ? 'is-cut' : ''}>
+              {selected.operation === 'subtract' ? 'CUT' : 'ADD'}
+            </span>
+          </div>
+          <div className="csg-field-group">
+            <span>POSITION</span>
+            <div className="csg-field-grid">
+              {number(selected.position[0], (value) =>
+                updateSolidFeature(selected.id, { position: [value, selected.position[1], selected.position[2]] }),
+              )}
+              {number(selected.position[1], (value) =>
+                updateSolidFeature(selected.id, { position: [selected.position[0], value, selected.position[2]] }),
+              )}
+              {number(selected.position[2], (value) =>
+                updateSolidFeature(selected.id, { position: [selected.position[0], selected.position[1], value] }),
+              )}
+            </div>
+          </div>
+          {selected.shape === 'box' && (
+            <div className="csg-field-group">
+              <span>SIZE</span>
+              <div className="csg-field-grid">
+                {number(selected.size[0], (value) =>
+                  updateSolidFeature(selected.id, { size: [value, selected.size[1], selected.size[2]] }),
+                )}
+                {number(selected.size[1], (value) =>
+                  updateSolidFeature(selected.id, { size: [selected.size[0], value, selected.size[2]] }),
+                )}
+                {number(selected.size[2], (value) =>
+                  updateSolidFeature(selected.id, { size: [selected.size[0], selected.size[1], value] }),
+                )}
+              </div>
+            </div>
+          )}
+          {selected.shape !== 'box' && (
+            <div className="csg-field-group">
+              <span>{selected.shape === 'sphere' ? 'RADIUS' : 'RADIUS / HEIGHT'}</span>
+              <div className="csg-field-grid">
+                {number(selected.radius, (value) => updateSolidFeature(selected.id, { radius: value }))}
+                {selected.shape === 'cylinder' &&
+                  number(selected.height, (value) => updateSolidFeature(selected.id, { height: value }))}
+                {selected.shape === 'cylinder' && (
+                  <select
+                    className="input"
+                    value={selected.axis}
+                    onChange={(event) =>
+                      updateSolidFeature(selected.id, { axis: event.target.value as 'x' | 'y' | 'z' })
+                    }
+                  >
+                    <option value="x">X</option>
+                    <option value="y">Y</option>
+                    <option value="z">Z</option>
+                  </select>
+                )}
+              </div>
+            </div>
+          )}
+          <div className="csg-field-group">
+            <span>ROTATION · DEG</span>
+            <div className="csg-field-grid">
+              {number(selected.rotation[0], (value) =>
+                updateSolidFeature(selected.id, { rotation: [value, selected.rotation[1], selected.rotation[2]] }),
+              )}
+              {number(selected.rotation[1], (value) =>
+                updateSolidFeature(selected.id, { rotation: [selected.rotation[0], value, selected.rotation[2]] }),
+              )}
+              {number(selected.rotation[2], (value) =>
+                updateSolidFeature(selected.id, { rotation: [selected.rotation[0], selected.rotation[1], value] }),
+              )}
+            </div>
+          </div>
+          <div className="csg-inspector__actions">
+            <button
+              type="button"
+              className={selected.operation === 'add' ? 'is-active' : ''}
+              onClick={() => updateSolidFeature(selected.id, { operation: 'add' })}
+            >
+              添加
+            </button>
+            <button
+              type="button"
+              className={selected.operation === 'subtract' ? 'is-active is-cut' : ''}
+              onClick={() => updateSolidFeature(selected.id, { operation: 'subtract' })}
+            >
+              切除
+            </button>
+            <button
+              type="button"
+              className="csg-delete"
+              onClick={() => deleteSolidFeature(selected.id)}
+              disabled={features.length <= 1}
+            >
+              <Minus size={11} /> 删除
+            </button>
+          </div>
+        </div>
+      )}
+      <div className="csg-builder__hint">
+        <Info size={12} />
+        <span>参数化 CSG：每个特征先旋转、平移，再参与布尔 union / difference。修改后会实时重建。</span>
+      </div>
+    </div>
+  );
+}
+
 function FeatureTree() {
   const model = useAppStore((state) => state.model);
   const selectedFeatureId = useAppStore((state) => state.selectedFeatureId);
@@ -351,7 +496,15 @@ export function ModelPanel() {
             {rail === 'materials' ? 'MATERIALS' : rail === 'history' ? 'HISTORY' : 'MODEL GRAPH'}
           </span>
           <h2>
-            {rail === 'materials' ? '材料' : rail === 'history' ? '版本' : blank ? '空白工程' : '参数化支架'}
+            {rail === 'materials'
+              ? '材料'
+              : rail === 'history'
+                ? '版本'
+                : blank
+                  ? '空白工程'
+                  : (model.template ?? 'bracket') === 'csg'
+                    ? 'CSG 特征模型'
+                    : '参数化支架'}
           </h2>
         </div>
         <div className="model-panel__head-right">
@@ -388,6 +541,7 @@ export function ModelPanel() {
                 <span>{model.meta.discipline}</span>
               </div>
             </div>
+            {(model.template ?? 'bracket') === 'csg' && <CsgBuilder />}
             {blank ? <BlankStarter /> : <FeatureTree />}
             {!blank && (
               <div className="geometry-readout">

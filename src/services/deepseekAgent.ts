@@ -143,6 +143,44 @@ function toolAction(call: DeepSeekToolCall): AgentAction {
       label: '',
     };
   }
+  if (name === 'generate_preset') {
+    const preset = String(args.preset ?? '');
+    if (preset !== 'brake-pedal') throw new Error(`未知预设：${preset}`);
+    return {
+      tool: 'generate_preset',
+      args: { preset, reason: String(args.reason ?? '') },
+      label: '',
+    };
+  }
+  if (name === 'add_solid_feature') {
+    const shape = String(args.shape ?? '');
+    if (!['box', 'cylinder', 'sphere'].includes(shape)) throw new Error(`无效实体类型：${shape}`);
+    const operation = String(args.operation ?? 'add');
+    if (!['add', 'subtract'].includes(operation)) throw new Error(`无效布尔操作：${operation}`);
+    const axis = String(args.axis ?? 'z');
+    if (!['x', 'y', 'z'].includes(axis)) throw new Error(`无效圆柱轴：${axis}`);
+    return {
+      tool: 'add_solid_feature',
+      args: {
+        shape,
+        operation,
+        x: asNumber(args.x ?? 65, 'x'),
+        y: asNumber(args.y ?? 0, 'y'),
+        z: asNumber(args.z ?? 45, 'z'),
+        sx: asNumber(args.sx ?? 40, 'sx'),
+        sy: asNumber(args.sy ?? 30, 'sy'),
+        sz: asNumber(args.sz ?? 20, 'sz'),
+        radius: asNumber(args.radius ?? 15, 'radius'),
+        height: asNumber(args.height ?? 40, 'height'),
+        axis,
+        rx: asNumber(args.rx ?? 0, 'rx'),
+        ry: asNumber(args.ry ?? 0, 'ry'),
+        rz: asNumber(args.rz ?? 0, 'rz'),
+        reason: String(args.reason ?? ''),
+      },
+      label: '',
+    };
+  }
   if (name === 'explain_risk') {
     return { tool: 'explain_risk', args: {}, label: '' };
   }

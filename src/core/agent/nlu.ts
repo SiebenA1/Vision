@@ -155,13 +155,36 @@ function actionLabel(action: AgentAction): string {
       return '解析危险截面与失效裕度';
     case 'export_report':
       return '生成工程校核报告';
+    case 'generate_preset':
+      return '生成刹车踏板支架 CSG 模型';
+    case 'add_solid_feature':
+      return '添加 CSG 实体特征';
     default:
       return '等待更多信息';
   }
 }
 
+function brakePedalPlan(): AgentPlan {
+  return {
+    intent: 'modeling',
+    summary:
+      '将生成一个由 16 个 CSG 特征组成的刹车踏板支架：安装背板、双侧叉板、加强筋、枢轴座、踏板臂与安装/减重孔，然后重建 watertight 几何。',
+    actions: [
+      {
+        tool: 'generate_preset',
+        args: { preset: 'brake-pedal' },
+        label: '生成刹车踏板支架 CSG 模型',
+      },
+    ],
+    confidence: 0.97,
+  };
+}
+
 export function parseEngineeringPrompt(prompt: string, model: ModelDocument): AgentPlan {
   const text = normalize(prompt);
+  if (/(刹车|制动|brake).*(踏板|pedal)|(踏板|pedal).*(支架|bracket)|(刹车|制动).*(支架|bracket)/.test(text)) {
+    return brakePedalPlan();
+  }
   const actions: AgentAction[] = [];
 
   const materialId = findMaterial(text);
