@@ -89,7 +89,7 @@ export default function AnalysisWorkspace({ onClose, onRun, onRefine, onExport }
         </div>
         <div className="workspace-bar__meta">
           <span className="chip">{model.code} · {model.revision}</span>
-          <span className="chip">C3D8</span>
+          <span className="chip">C3D4</span>
           <span className={`chip ${stale ? 'chip--warn' : analysis ? 'chip--good' : ''}`}>
             {stale ? 'STALE RESULT' : analysis ? 'HASH ' + analysis.modelHash : 'NOT SOLVED'}
           </span>
@@ -139,15 +139,15 @@ export default function AnalysisWorkspace({ onClose, onRun, onRefine, onExport }
               <div className="study-tree__leaf">
                 <span>MSH</span>
                 <div>
-                  <b>C3D8 · {analysis ? analysis.mesh.elements.toLocaleString('en-US') : '—'} EL</b>
-                  <small>h {analysis ? fmt(analysis.mesh.cellSize, 2) : '—'} mm · conservative</small>
+                  <b>C3D4 · {analysis ? analysis.mesh.elements.toLocaleString('en-US') : '—'} EL</b>
+                  <small>h {analysis ? fmt(analysis.mesh.cellSize, 2) : '—'} mm · Gmsh</small>
                 </div>
               </div>
               <div className="study-tree__leaf">
                 <span>SLV</span>
                 <div>
-                  <b>PCG / Jacobi</b>
-                  <small>{analysis ? `${analysis.solver.iterations} iter` : 'not run'}</small>
+                  <b>SfePy / Direct</b>
+                  <small>{analysis ? 'linear elastic' : 'not run'}</small>
                 </div>
               </div>
             </div>
@@ -308,7 +308,7 @@ export default function AnalysisWorkspace({ onClose, onRun, onRefine, onExport }
               <div className="analysis-busy">
                 <span className="spinner spinner--large" />
                 <div>
-                  <b>{status === 'mesh' ? '生成 C3D8 网格' : status === 'refine' ? 'h-加密校核' : 'PCG 迭代求解'}</b>
+                  <b>{status === 'mesh' ? '生成 C3D4 网格' : status === 'refine' ? 'h-加密校核' : 'SfePy 求解'}</b>
                   <span>{progress?.detail ?? '初始化…'}</span>
                 </div>
                 <b className="mono">{Math.round(progress?.percent ?? 0)}%</b>
@@ -430,8 +430,8 @@ export default function AnalysisWorkspace({ onClose, onRun, onRefine, onExport }
               </tbody>
             </table>
             <div className="solver-meta">
-              <span>PCG {analysis?.solver.iterations ?? '—'} iter</span>
-              <span>‖r‖/‖f‖ {analysis?.solver.relativeResidual.toExponential(2) ?? '—'}</span>
+              <span>SfePy direct</span>
+              <span>P1 tetra</span>
               <span>{analysis ? `${fmt(analysis.solver.solveMs, 0)} ms` : '—'}</span>
             </div>
           </div>
@@ -441,7 +441,7 @@ export default function AnalysisWorkspace({ onClose, onRun, onRefine, onExport }
             <div className="trace-list">
               <div><span>模型指纹</span><code>{analysis?.modelHash ?? '—'}</code></div>
               <div><span>材料</span><b>{material.shortName}</b></div>
-              <div><span>求解器</span><b>VISION C3D8 / v0.1</b></div>
+              <div><span>求解器</span><b>NVIDIA USD BRep + Gmsh + SfePy</b></div>
               <div><span>时间</span><b>{analysis ? new Date(analysis.createdAt).toLocaleString('zh-CN') : '—'}</b></div>
             </div>
           </div>
@@ -455,7 +455,7 @@ export default function AnalysisWorkspace({ onClose, onRun, onRefine, onExport }
       </div>
       <div className="workspace-statusbar">
         <span><Waves size={12} /> {analysis ? `${analysis.mesh.elements.toLocaleString('en-US')} EL · ${analysis.mesh.dofs.toLocaleString('en-US')} DOF` : 'NO RESULT'}</span>
-        <span><Check size={12} /> {analysis?.solver.converged ? 'PCG CONVERGED' : 'PENDING'}</span>
+        <span><Check size={12} /> {analysis?.solver.converged ? 'SFEPY CONVERGED' : 'PENDING'}</span>
         <span><ArrowUpRight size={12} /> {analysis ? `STRAIN ENERGY ${fmt(analysis.solver.strainEnergyMj, 1)} mJ` : ''}</span>
         <span className="workspace-statusbar__right">ESC 返回 · 本地求解 · 无数据外传</span>
       </div>

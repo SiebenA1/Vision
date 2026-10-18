@@ -16,8 +16,8 @@ await page.route('**/api/deepseek/models', async (route) => {
   await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ object: 'list', data: [{ id: 'deepseek-flash', object: 'model' }] }) });
 });
 
-const script = `from build123d import *
-result = Box(100, 20, 10)
+const script = `import usd_brep as u
+result = u.create_box((-50, -10, -5), 100, 20, 10)
 `;
 let turn = 0;
 await page.route('**/api/deepseek/chat/completions', async (route) => {
@@ -25,7 +25,7 @@ await page.route('**/api/deepseek/chat/completions', async (route) => {
   if (turn === 1) {
     const chunks = [
       { id: 'm1', object: 'chat.completion.chunk', model: 'deepseek-flash', choices: [{ index: 0, delta: { role: 'assistant', reasoning_content: '生成悬臂梁 B-Rep，再用 Gmsh/SfePy 求解。' }, finish_reason: null }] },
-      { id: 'm1', object: 'chat.completion.chunk', model: 'deepseek-flash', choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'call_cad', type: 'function', function: { name: 'run_build123d', arguments: JSON.stringify({ script, name: '悬臂梁验证', code: 'CAD-8001', density_kg_m3: 7850, materialId: 'STEEL-4340' }) } }] }, finish_reason: null }] },
+      { id: 'm1', object: 'chat.completion.chunk', model: 'deepseek-flash', choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'call_cad', type: 'function', function: { name: 'run_usd_brep', arguments: JSON.stringify({ script, name: '悬臂梁验证', code: 'CAD-8001', density_kg_m3: 7850, materialId: 'STEEL-4340' }) } }] }, finish_reason: null }] },
       { id: 'm1', object: 'chat.completion.chunk', model: 'deepseek-flash', choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }], usage: { prompt_tokens: 600, completion_tokens: 100, total_tokens: 700 } },
     ];
     await route.fulfill({ status: 200, headers: { 'content-type': 'text/event-stream' }, body: chunks.map((c) => `data: ${JSON.stringify(c)}\n\n`).join('') + 'data: [DONE]\n\n' });
@@ -46,10 +46,10 @@ await page.getByRole('button', { name: '测试连接' }).click();
 await page.waitForFunction(() => document.body.innerText.includes('连接成功'), null, { timeout: 10000 });
 await page.getByRole('button', { name: '保存并启用' }).click();
 await page.waitForTimeout(700);
-await page.locator('#copilot-input').fill('用 build123d 建模 100×20×10 mm 悬臂梁，并校核。');
+await page.locator('#copilot-input').fill('建模 100×20×10 mm 悬臂梁，并校核。');
 await page.locator('#copilot-input').press('Enter');
 await page.waitForFunction(
-  () => document.body.innerText.includes('已更新当前工程') || document.body.innerText.includes('build123d B-Rep'),
+  () => document.body.innerText.includes('已更新当前工程') || document.body.innerText.includes('NVIDIA USD BRep'),
   null,
   { timeout: 60000 },
 );

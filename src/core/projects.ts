@@ -44,7 +44,7 @@ export function isProjectRecord(value: unknown): value is ProjectRecord {
 
 /**
  * A blank project is the only built-in project. Geometry must come from the
- * generic build123d/OCCT backend; there are no model presets.
+ * generic NVIDIA USD BRep backend; there are no model presets.
  */
 export function createBlankProjectModel(code = 'CAD-000', name = '空白工程'): ModelDocument {
   const now = isoNow();
@@ -53,7 +53,7 @@ export function createBlankProjectModel(code = 'CAD-000', name = '空白工程')
     id: `mdl_${Date.now().toString(36)}`,
     code,
     name,
-    subtitle: 'Blank build123d / OCCT workspace',
+    subtitle: 'Blank NVIDIA USD BRep workspace',
     revision: 'R01',
     template: 'empty',
     units: 'mm-N-MPa',
@@ -93,7 +93,7 @@ export function createBlankProjectModel(code = 'CAD-000', name = '空白工程')
       discipline: '结构 · 静力',
       created: now.slice(0, 10),
       analyst: 'ATLAS / 工程智能体',
-      designIntent: '空白工程：通过 build123d/OCCT 脚本定义几何、载荷和约束。没有预置模型。',
+      designIntent: '空白工程：通过 NVIDIA USD BRep 脚本定义几何、载荷和约束。没有预置模型。',
     },
   };
 }

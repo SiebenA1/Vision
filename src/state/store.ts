@@ -161,9 +161,9 @@ function chatSeedFor(model: ModelDocument): ChatMessage[] {
   const external = model.template === 'external';
   const content =
     model.template === 'empty'
-      ? `${model.code} · ${model.name} 空白工程已创建。当前没有几何体。\n\n直接在 ATLAS 中用 build123d 描述零件；模型会由 OCCT B-Rep 内核执行并生成精确几何。没有预置模型。`
+      ? `${model.code} · ${model.name} 空白工程已创建。当前没有几何体。\n\n直接在 ATLAS 中用 NVIDIA USD BRep 描述零件；模型会由 NURBS B-Rep 内核执行并生成精确几何。没有预置模型。`
       : external
-        ? `${model.code} · ${model.name} 已通过 build123d/OCCT 生成。几何来自本次脚本，不是预设模型。\n\n可运行基线校核，或继续描述要修改的几何。`
+        ? `${model.code} · ${model.name} 已通过 NVIDIA USD BRep 生成。几何来自本次脚本，不是预设模型。\n\n可运行基线校核，或继续描述要修改的几何。`
         : `${model.code} · ${model.name} 已载入。`;
   return [
     {
@@ -263,7 +263,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
         set({
           buildSeq: seq,
           building: false,
-          geometryError: '外部 B-Rep 模型缺少 STL 数据，请重新执行 build123d 脚本。',
+          geometryError: '外部 B-Rep 模型缺少 STL 数据，请重新执行 USD BRep 脚本。',
         });
         return null;
       }
@@ -312,7 +312,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
     set({
       buildSeq: seq,
       building: false,
-      geometryError: '不支持的几何模板；几何必须由 build123d/OCCT 后端生成。',
+      geometryError: '不支持的几何模板；几何必须由 NVIDIA USD BRep 后端生成。',
     });
     return null;
   },

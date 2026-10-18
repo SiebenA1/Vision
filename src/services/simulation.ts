@@ -47,8 +47,8 @@ export async function runStudy(options: RunStudyOptions = {}): Promise<AnalysisR
     useAppStore.getState().setAnalysisStatus('error');
     return null;
   }
-  if (!model.externalScript) {
-    const message = '当前模型没有 build123d 脚本，Gmsh/SfePy 需要可重放的 B-Rep 源。';
+  if (!model.externalScript || !model.externalStlBase64) {
+    const message = '当前模型没有 USD BRep 脚本/STL，Gmsh/SfePy 需要可重放的 B-Rep 源。';
     useAppStore.getState().setAnalysisError(message);
     useAppStore.getState().setAnalysisStatus('error');
     useAppStore.getState().addToast({ title: '无法求解', detail: message, tone: 'error' });
@@ -61,13 +61,13 @@ export async function runStudy(options: RunStudyOptions = {}): Promise<AnalysisR
   useAppStore.getState().setSolveProgress({
     phase: 'mesh',
     percent: 8,
-    detail: 'Gmsh：从 OCCT STEP 生成 3D 四面体网格',
+    detail: 'USD BRep 曲面 → Gmsh 3D 四面体网格',
   });
   if (options.openWorkspace) useAppStore.getState().openWorkspace('analysis');
 
   try {
     const raw = await solveFea({
-      script: model.externalScript,
+      stlBase64: model.externalStlBase64,
       material: {
         E: material.E,
         nu: material.nu,

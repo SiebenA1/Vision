@@ -1,8 +1,6 @@
-# Native open-source CAD/CAE backend
-# Python 3.10+ recommended. The current environment validated Python 3.13.
-build123d==0.11.1
+﻿# HTTP/FEA runtime (CPython 3.13)
 gmsh==4.15.2
 sfepy>=2026.3
+meshio
 numpy
 scipy
-meshio

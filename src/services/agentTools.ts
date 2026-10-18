@@ -4,7 +4,7 @@ import { useAppStore } from '../state/store';
 import { runStudy, wait } from './simulation';
 import { fmt, vectorLabel } from '../lib/format';
 import { directionVector } from '../core/llm/tools';
-import { executeBuild123d } from './engineeringBackend';
+import { executeNvidiaBrep } from './engineeringBackend';
 
 const FACES: FaceId[] = ['x-min', 'x-max', 'y-min', 'y-max', 'z-min', 'z-max'];
 
@@ -40,8 +40,8 @@ export function labelForAction(action: AgentAction): string {
       return '解析危险截面与失效裕度';
     case 'export_report':
       return '生成工程校核报告';
-    case 'run_build123d':
-      return '执行 build123d / OCCT 建模脚本';
+    case 'run_usd_brep':
+      return '执行 NVIDIA USD BRep 建模脚本';
     default:
       return '执行工程工具';
   }
@@ -197,7 +197,7 @@ function actionResultSummary(action: AgentAction): string {
     return `**校核结果**\n最大应力 **${fmt(result.maxVonMises, 1)} MPa**，最大位移 **${fmt(
       result.maxDisplacement,
       3,
-    )} mm**，安全系数 **${fmt(result.safetyFactor, 2)}**，质量 **${fmt(result.massKg, 3)} kg**。求解器：${result.solver.method === 'SfePy' ? 'Gmsh + SfePy' : 'C3D8 / PCG'}。`;
+    )} mm**，安全系数 **${fmt(result.safetyFactor, 2)}**，质量 **${fmt(result.massKg, 3)} kg**。求解器：NVIDIA USD BRep + Gmsh + SfePy。`;
   }
   if (action.tool === 'set_variable') {
     return `已更新 **${action.args.label}** 至 **${action.args.value} ${action.args.unit ?? 'mm'}**，几何已重建${
@@ -228,11 +228,11 @@ export async function executeTool(action: AgentAction, lastResultRef: LastResult
   const store = useAppStore.getState();
   let detail = '';
   let summary = '';
-  if (action.tool === 'run_build123d') {
+  if (action.tool === 'run_usd_brep') {
     const script = String(action.args.script ?? '');
-    if (!script.trim()) throw new Error('build123d 脚本为空。');
+    if (!script.trim()) throw new Error('USD BRep 脚本为空。');
     const density = Number(action.args.density_kg_m3 ?? 2700);
-    const result = await executeBuild123d(script, density);
+    const result = await executeNvidiaBrep(script, density);
     store.adoptExternalModel({
       name: String(action.args.name ?? 'AI B-Rep 模型'),
       code: String(action.args.code ?? `CAD-${String(Date.now()).slice(-4)}`),

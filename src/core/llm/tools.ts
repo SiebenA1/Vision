@@ -289,15 +289,16 @@ export function buildDeepSeekTools(model: ModelDocument): DeepSeekTool[] {
     {
       type: 'function',
       function: {
-        name: 'run_build123d',
+        name: 'run_usd_brep',
         description:
-          '通用 CAD 建模入口：执行一段 build123d Python 脚本，由 OCCT B-Rep 内核精确建模。脚本必须把最终 Part/Solid/Compound/BuildPart 赋给名为 result 的顶层变量。单位 mm。用于任何用户自定义几何；不要用固定预设代替用户需求。默认更新当前工程；只有用户明确要求“新建工程”时才设置 new_project=true。',
+          '通用 CAD 建模入口：执行一段 NVIDIA USD BRep（NURBS B-Rep）Python 脚本。脚本必须 import usd_brep as u，并把一个 usd_brep.Brep 赋给名为 result 的顶层变量。单位 mm，Z 向上。默认更新当前工程；只有用户明确要求“新建工程”时才设置 new_project=true。',
         parameters: {
           type: 'object',
           properties: {
             script: {
               type: 'string',
-              description: 'Complete build123d script. Must assign `result` at top level.',
+              description:
+                'Complete Python script using usd_brep. Example: "import usd_brep as u\\nresult = u.create_box((0,0,0), 100, 20, 10)". Must assign `result` (a Brep) at top level.',
             },
             name: { type: 'string', description: 'Short model name. For an update this is ignored unless creating a new project.' },
             code: { type: 'string', description: 'Optional project code. Only used when new_project=true.' },
@@ -481,7 +482,7 @@ export function buildModelContext(
       'run_analysis',
       'explain_risk',
       'export_report',
-      'run_build123d',
+      'run_usd_brep',
     ],
   };
 }

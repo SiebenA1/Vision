@@ -1,0 +1,2 @@
+﻿# NVIDIA CAD worker runtime (CPython 3.12 only)
+usd-brep==1.0.0

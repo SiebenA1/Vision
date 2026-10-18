@@ -276,7 +276,7 @@ export interface AgentAction {
     | 'run_analysis'
     | 'explain_risk'
     | 'export_report'
-    | 'run_build123d'
+    | 'run_usd_brep'
     | 'unknown';
   args: Record<string, string | number | boolean>;
   label: string;

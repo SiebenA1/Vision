@@ -30,7 +30,7 @@ export function createExternalModel(input: ExternalModelInput): {
 } {
   const model = createBlankProjectModel(input.code ?? `CAD-${String(Date.now()).slice(-4)}`, input.name || 'AI B-Rep 模型');
   model.id = `mdl_${Date.now().toString(36)}`;
-  model.subtitle = 'build123d / OCCT B-Rep';
+  model.subtitle = 'NVIDIA USD BRep';
   model.template = 'external';
   model.materialId = input.materialId ?? 'AL6061-T6';
   model.variables = [];
@@ -38,11 +38,11 @@ export function createExternalModel(input: ExternalModelInput): {
     {
       id: 'backend',
       index: '01',
-      name: 'build123d B-Rep',
+      name: 'NVIDIA USD BRep',
       nameEn: 'B-REP',
       kind: 'solid',
       operation: 'add',
-      description: 'OCCT 精确 B-Rep · 由 build123d 脚本实时生成',
+      description: 'NVIDIA NURBS B-Rep · 由 usd_brep 脚本实时生成',
       variableKeys: [],
       quality: 'primary',
     },
@@ -73,7 +73,7 @@ export function createExternalModel(input: ExternalModelInput): {
   model.mesh = { ...model.mesh, cellSizeMm: 1.5, elementType: 'C3D4' };
   model.meta.created = new Date().toISOString().slice(0, 10);
   model.meta.designIntent =
-    '由 build123d/OCCT 生成的精确 B-Rep 几何。载荷与约束为通用占位，必须在分析前按工程工况确认。';
+    '由 NVIDIA USD BRep（NURBS）生成的精确 B-Rep 几何。载荷与约束为通用占位，必须在分析前按工程工况确认。';
   const { min, max, size } = input.metrics.bbox_mm;
   const metrics: GeometryMetrics = {
     volumeCm3: input.metrics.volume_mm3 / 1000,

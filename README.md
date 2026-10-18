@@ -3,11 +3,11 @@
 **AI-native CAD / CAE engineering studio.**
 
 VISION turns a natural-language engineering request into a deterministic
-build123d/OCCT script, exact B-Rep geometry, a Gmsh tetrahedral mesh, a SfePy
-linear-elastic solve, and a traceable result. There are **no built-in model
+NVIDIA USD BRep script, NURBS B-Rep geometry, a Gmsh tetrahedral mesh, a SfePy
+linear-elastic solve, and traceable evidence. There are **no built-in model
 presets**.
 
-> Intent → build123d → OCCT B-Rep → Gmsh → SfePy → Evidence
+> Intent → NVIDIA USD BRep → Gmsh → SfePy → Evidence
 
 ---
 
@@ -16,20 +16,22 @@ presets**.
 | Layer | Implementation |
 |---|---|
 | UI | React 19, TypeScript, Vite, Three.js, Zustand |
-| Agent | DeepSeek Chat Completions + native tool calling; local planner for material/load/analysis actions |
-| CAD | build123d 0.11.1 + OCCT 7.9.3.1 (`cadquery-ocp-novtk`) |
-| Mesh | Gmsh 4.15.2 |
+| Agent | DeepSeek Chat Completions + native tool calling |
+| CAD kernel | NVIDIA USD BRep 1.0.0 (NURBS B-Rep, Apache-2.0) |
+| CAD worker | CPython 3.12 + `usd-brep` |
+| Mesh | Gmsh 4.15.2 (surface reconstruction + C3D4 tetrahedra) |
 | FEA | SfePy 2026.3, P1 tetrahedra, linear elasticity |
 | Persistence | localStorage project library (`vision.project.library.v2`) |
 
-The CAD/CAE backend runs as a local Python HTTP service. The browser only sends a
-build123d script and engineering inputs; it never sends a fixed model id.
+The usd-brep wheel is published for **CPython 3.12 only**, so CAD scripts run in
+an isolated worker. The HTTP backend and Gmsh/SfePy run on Python 3.13.
 
 ```text
 User prompt
-  → DeepSeek run_build123d
-  → build123d script
-  → OCCT STEP
+  → DeepSeek run_usd_brep
+  → NVIDIA USD BRep script
+  → exact NURBS B-Rep
+  → tessellated STL
   → Gmsh C3D4 mesh
   → SfePy solve
   → nodal displacement / von Mises
@@ -38,18 +40,29 @@ User prompt
 
 ## Start
 
-Requires Node.js ≥ 20.19 and Python 3.10+.
+Requires Node.js ≥ 20.19, Python 3.13, and a separate Python 3.12 for the
+usd-brep worker.
 
 ```bash
 npm install
 python -m pip install -r server/requirements.txt
 ```
 
+Install the NVIDIA CAD worker:
+
+```powershell
+# CPython 3.12 is required by the usd-brep wheel
+python -m pip install usd-brep==1.0.0
+```
+
+The default worker path is `.python312/python.exe`. Override it with
+`VISION_USD_PYTHON` if your 3.12 interpreter lives elsewhere.
+
 Terminal 1 — backend:
 
 ```bash
 npm run backend
-# http://127.0.0.1:8105
+# http://127.0.0.1:8109
 ```
 
 Terminal 2 — frontend:
@@ -65,21 +78,39 @@ Configure a DeepSeek API key in the UI or `.env`:
 DEEPSEEK_API_KEY=sk-...
 ```
 
-Without an API key there is no modeling fallback: the application deliberately
-does not contain preset models.
+Without a key there is no modeling fallback: the application deliberately has
+no preset models.
+
+## CAD script contract
+
+A script must import `usd_brep` and assign a `Brep` to `result`:
+
+```python
+import usd_brep as u
+
+body = u.create_box((0, 0, 0), 100, 20, 10)
+hole = u.create_cylinder((30, 10, -1), 6, 12)
+result = u.boolean_difference(body, hole)
+```
+
+Booleans consume their inputs; use `body.copy()` when a body is reused.
+The worker tessellates `result` to STL and computes exact volume, area, bbox and
+mass. Units are mm.
 
 ## What works
 
 - blank project; no model seed data
-- arbitrary build123d Python → OCCT B-Rep
+- arbitrary NVIDIA USD BRep Python → NURBS B-Rep
 - exact volume, area, bounding box and mass metrics
 - STL viewport ingestion
-- Gmsh STEP → C3D4 mesh
+- Gmsh surface reconstruction → C3D4 volume mesh
 - SfePy linear-elastic static solve
 - nodal displacement and von Mises field
 - face-based supports/loads (`x-min`, `x-max`, ...)
-- analytic cantilever validation, live: currently **4.65%** error (8% limit)
+- analytic cantilever validation, live: currently **7.47%** error (8% limit)
 - project persistence, DeepSeek streaming/tool-call loop, report export
+- geometry edits update the **active project in place** unless the user
+  explicitly requests a new project
 
 ## Validation
 
@@ -90,20 +121,17 @@ compares the SfePy tip displacement against:
 delta = P L^3 / (3 E I)
 ```
 
-Latest result: reference **0.095238 mm**, computed **0.099663 mm**, error
-**4.65%**, 28,961 C3D4 elements → **PASS**.
+Latest result: reference **0.095238 mm**, computed **0.088122 mm**, error
+**7.47%**, 28,625 C3D4 elements → **PASS**.
 
 ## API
 
 ```text
-GET  /health          backend/package versions
+GET  /health          kernel/package versions
 POST /cad/execute     { script, density_kg_m3 } → metrics + STL
-POST /fea/solve       { script, material, supports, loads, mesh_size }
+POST /fea/solve       { stlBase64, material, supports, loads, mesh_size }
 POST /fea/validate    live cantilever benchmark
 ```
-
-The CAD script must assign its final shape to a top-level variable named
-`result`.
 
 ## Tests
 
@@ -113,22 +141,28 @@ npm run typecheck
 npm run build
 ```
 
+Browser regression:
+
+```bash
+node scripts/sfepy-mock-test.mjs
+node scripts/same-project-test.mjs
+```
+
 ## Limits
 
-- No sketch constraints, NURBS/B-Rep feature history, fillets or assemblies in
-  the UI yet; build123d itself supports them in the generated script.
 - Face selection is by axis-aligned bounding boxes, not interactive face picking.
 - Isotropic linear elasticity only; no contact, bolt preload, composite layup,
   fatigue, buckling or CFD.
-- SfePy P1 tetrahedra; thin-wall and peak-stress results need mesh refinement.
-- The backend executes arbitrary Python and is bound to loopback only. Do not
-  expose it to untrusted users.
+- Gmsh reconstructs a volume from the tessellated USD BRep surface; thin walls
+  and sharp edges require mesh refinement.
+- SfePy P1 tetrahedra; peak stress is screening evidence, not certification.
+- The backend executes arbitrary local Python and is bound to loopback only.
 
 ## Layout
 
 ```text
 src/
-  core/cad/          build123d/OCCT external model + STL transport
+  core/cad/          external model + STL transport
   core/fea/          result-field projection only
   services/          DeepSeek agent, engineering backend client, simulation
   state/             Zustand store and project persistence
@@ -136,6 +170,7 @@ src/
   features/          lazy analysis workspace
 server/
   engineering_server.py  HTTP endpoints
+  usd_brep_worker.py     CPython 3.12 NVIDIA CAD worker
   fea_solver.py          Gmsh + SfePy solve subprocess
-  fea_bench.py           standalone cantilever benchmark
+  examples/              usd_brep examples
 ```

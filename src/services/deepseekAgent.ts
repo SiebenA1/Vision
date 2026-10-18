@@ -132,11 +132,11 @@ function toolAction(call: DeepSeekToolCall): AgentAction {
       label: '',
     };
   }
-  if (name === 'run_build123d') {
+  if (name === 'run_usd_brep') {
     const script = String(args.script ?? '');
-    if (!script.trim()) throw new Error('build123d 脚本为空');
+    if (!script.trim()) throw new Error('USD BRep 脚本为空');
     return {
-      tool: 'run_build123d',
+      tool: 'run_usd_brep',
       args: {
         script,
         name: String(args.name ?? 'AI B-Rep 模型'),

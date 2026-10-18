@@ -174,7 +174,7 @@ export function ViewportStage({ onRun, onOpenAnalysis }: ViewportStageProps) {
             <b>{blank ? '空白工程' : '几何体未载入'}</b>
             <span>
               {blank
-                ? '在 ATLAS 中用 build123d 描述零件，OCCT 会生成精确 B-Rep。'
+                ? '在 ATLAS 中用 NVIDIA USD BRep 描述零件，内核会生成精确 B-Rep。'
                 : '运行重建以初始化参数化特征图。'}
             </span>
           </div>

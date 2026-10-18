@@ -53,10 +53,10 @@ describe('blank project library', () => {
 });
 
 describe('generic modeling tool contract', () => {
-  it('exposes build123d and no preset generator', () => {
+  it('exposes USD BRep and no preset generator', () => {
     const tools = buildDeepSeekTools(seedProjects()[0].model);
     const names = tools.map((tool) => tool.function.name);
-    expect(names).toContain('run_build123d');
+    expect(names).toContain('run_usd_brep');
     expect(names).not.toContain('generate_preset');
     expect(names).not.toContain('create_wheel_rim');
     expect(names).not.toContain('add_solid_feature');

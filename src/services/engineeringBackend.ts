@@ -1,15 +1,17 @@
 /**
  * Client for the local open-source engineering backend.
  *
- * The backend executes a caller-supplied build123d/OCCT script. It is a generic
+ * The backend executes a caller-supplied NVIDIA USD BRep script. It is a generic
  * B-Rep CAD service; this client deliberately contains no model presets.
  */
 
 export interface EngineeringBackendHealth {
   ok: boolean;
-  build123d: string | null;
-  ocp: string | null;
+  cad_kernel: string;
+  usd_brep: string | null;
+  usd_python: string;
   gmsh: string | null;
+  sfepy: string | null;
   python: string;
 }
 
@@ -24,10 +26,13 @@ export interface CadExecutionMetrics {
     size: [number, number, number];
   };
   center_mm: [number, number, number];
+  triangles?: number;
+  tessellation_tolerance_mm?: number;
+  kernel?: string;
 }
 
 export interface CadExecutionResult {
-  schema: 'vision.cad/1';
+  schema: 'vision.cad/2';
   metrics: CadExecutionMetrics;
   stlBase64: string;
   stlBytes: number;
@@ -101,7 +106,7 @@ export async function engineeringBackendHealth(): Promise<EngineeringBackendHeal
   return parseResponse<EngineeringBackendHealth>(response);
 }
 
-export async function executeBuild123d(
+export async function executeNvidiaBrep(
   script: string,
   densityKgM3 = 2700,
   signal?: AbortSignal,
@@ -116,7 +121,7 @@ export async function executeBuild123d(
 }
 
 export interface FeaSolveInput {
-  script: string;
+  stlBase64: string;
   material: {
     E: number;
     nu: number;
@@ -138,7 +143,7 @@ export async function solveFea(input: FeaSolveInput, signal?: AbortSignal): Prom
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      script: input.script,
+      stlBase64: input.stlBase64,
       material: input.material,
       supports: input.supports,
       loads: input.loads,

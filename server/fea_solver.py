@@ -57,34 +57,48 @@ def _select_load_triangles(
     tris: nm.ndarray,
     face: str,
     bbox: list[float],
-    band: float,
-) -> tuple[nm.ndarray, float]:
+) -> tuple[nm.ndarray, float, float]:
     axis, limit, sign, _ = _face_axis(face, bbox)
+    span = bbox[3] - bbox[0] if axis == 0 else bbox[4] - bbox[1] if axis == 1 else bbox[5] - bbox[2]
+    exact_tol = max(1e-6, span * 1e-5)
     coords = points[tris, axis]
-    exact = tris[nm.all(sign * (coords - limit) >= -band, axis=1)]
+    exact = tris[nm.all(nm.abs(coords - limit) <= exact_tol, axis=1)]
     area = sum(_triangle_area(points, tri) for tri in exact)
     if area > 0:
-        return exact, float(area)
+        return exact, float(area), exact_tol
     # Curved or sharp-end topology may not have a triangulated facet exactly on
     # the extreme plane. Select the boundary band around the extreme.
+    band = max(1e-4, span * 0.01)
     centroids = points[tris].mean(axis=1)[:, axis]
     near = tris[sign * (centroids - limit) >= -band]
     area = sum(_triangle_area(points, tri) for tri in near)
     if area > 0:
-        return near, float(area)
+        return near, float(area), band
     raise ValueError(
         f"load face {face} has no boundary facets within {band:.4f} mm; "
         f"bbox={bbox}"
     )
 
 
-def _mesh_from_step(step_path: Path, mesh_path: Path, mesh_size: float) -> dict[str, Any]:
+def _mesh_from_stl(stl_path: Path, mesh_path: Path, mesh_size: float) -> dict[str, Any]:
     gmsh.initialize()
     try:
         gmsh.option.setNumber("General.Terminal", 0)
         gmsh.model.add("vision")
-        gmsh.model.occ.importShapes(str(step_path))
-        gmsh.model.occ.synchronize()
+        gmsh.merge(str(stl_path))
+        # A full-pi classification merges all facets into a handful of surfaces
+        # and can produce overlapping boundary facets on revolved/boolean B-Reps.
+        # A moderate angle keeps more surface patches separate and is robust for
+        # both boxes and wheel-like solids.
+        gmsh.model.mesh.classifySurfaces(1.0, True, True, 1.0)
+        gmsh.model.mesh.createGeometry()
+        gmsh.model.geo.synchronize()
+        surfaces = [tag for dim, tag in gmsh.model.getEntities(2)]
+        if not surfaces:
+            raise ValueError("STL did not produce any boundary surfaces")
+        loop = gmsh.model.geo.addSurfaceLoop(surfaces)
+        gmsh.model.geo.addVolume([loop])
+        gmsh.model.geo.synchronize()
         bounds = gmsh.model.getBoundingBox(-1, -1)
         diag = math.dist(bounds[:3], bounds[3:])
         h = max(mesh_size, diag / 70.0)
@@ -178,26 +192,20 @@ def _stress_from_displacement(
 
 
 def _solve_impl(
-    script: str,
+    stl_base64: str,
     material: dict[str, Any],
     supports: list[dict[str, Any]],
     loads: list[dict[str, Any]],
     mesh_size: float = 4.0,
 ) -> dict[str, Any]:
-    from build123d import export_step
+    import base64
 
     run_dir = WORK_ROOT / f"run_{uuid.uuid4().hex[:10]}"
     run_dir.mkdir(parents=True, exist_ok=True)
-    namespace: dict[str, Any] = {"__name__": "__vision_fea__"}
-    exec(compile(script, "<build123d-script>", "exec"), namespace, namespace)
-    if "result" not in namespace:
-        raise ValueError("build123d script must assign `result`")
-    result = namespace["result"]
-    part = result.part if hasattr(result, "part") else result
-    step_path = run_dir / "model.step"
-    export_step(part, str(step_path))
+    stl_path = run_dir / "model.stl"
+    stl_path.write_bytes(base64.b64decode(stl_base64))
     mesh_path = run_dir / "model.mesh"
-    mesh = _mesh_from_step(step_path, mesh_path, max(0.5, mesh_size))
+    mesh = _mesh_from_stl(stl_path, mesh_path, max(0.5, mesh_size))
     points = mesh["vertices"]
     tets = mesh["tets"]
     tris = mesh["tris"]
@@ -207,10 +215,9 @@ def _solve_impl(
     load = next((item for item in loads if item.get("enabled", True)), None) or loads[0]
     fixed_face = str(support.get("face", "x-min"))
     load_face = str(load.get("face", "x-max"))
-    _, _, _, load_band = _face_axis(load_face, bbox)
     fixed_desc = _face_condition(fixed_face, bbox, _face_axis(fixed_face, bbox)[3])
+    selected, area, load_band = _select_load_triangles(points, tris, load_face, bbox)
     load_desc = _face_condition(load_face, bbox, load_band)
-    selected, area = _select_load_triangles(points, tris, load_face, bbox, load_band)
     if area <= 0:
         raise ValueError(f"load face {load_face} has no boundary area")
     force = nm.asarray(load.get("vector", [0, 0, -1]), dtype=nm.float64)
@@ -300,7 +307,7 @@ options = {{'output_dir': r"{run_dir}"}}
     }
 
 def solve(
-    script: str,
+    stl_base64: str,
     material: dict[str, Any],
     supports: list[dict[str, Any]],
     loads: list[dict[str, Any]],
@@ -315,7 +322,7 @@ def solve(
     request_path.write_text(
         json.dumps(
             {
-                "script": script,
+                "stlBase64": stl_base64,
                 "material": material,
                 "supports": supports,
                 "loads": loads,
@@ -343,7 +350,7 @@ def solve(
 if __name__ == "__main__" and len(sys.argv) == 3:
     payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
     response = _solve_impl(
-        payload["script"],
+        payload["stlBase64"],
         payload.get("material", {}),
         payload.get("supports", []),
         payload.get("loads", []),

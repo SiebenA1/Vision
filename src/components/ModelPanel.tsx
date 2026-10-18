@@ -344,15 +344,15 @@ export function ModelPanel() {
               <div className="blank-starter">
                 <div className="blank-starter__head">
                   <span className="eyebrow">BLANK PROJECT</span>
-                  <h3>通过 build123d 定义几何</h3>
+                  <h3>通过 NVIDIA USD BRep 定义几何</h3>
                   <p>
-                    当前没有几何，也没有任何预置模型。直接在 ATLAS 中描述零件；模型会用 build123d/OCCT
+                    当前没有几何，也没有任何预置模型。直接在 ATLAS 中描述零件；模型会用 NVIDIA USD BRep
                     脚本生成，再通过 STL 进入视口和仿真。
                   </p>
                 </div>
                 <div className="blank-starter__note">
                   <Info size={13} />
-                  <span>例如：“用 build123d 建模一个 18 英寸 9 辐轮辋，外径 457 mm、宽度 203 mm、PCD 114.3 mm。”</span>
+                  <span>例如：“建模一个 18 英寸 9 辐轮辋，外径 457 mm、宽度 203 mm、PCD 114.3 mm。”</span>
                 </div>
               </div>
             ) : (
@@ -412,7 +412,7 @@ export function ModelPanel() {
               <Cuboid size={13} />
               <span>
                 {(model.template ?? 'bracket') === 'external'
-                  ? 'build123d · OCCT B-Rep kernel · exact BREP metrics'
+                  ? 'NVIDIA USD BRep kernel · NURBS B-Rep · exact metrics'
                   : 'Manifold kernel · exact planar / quadric profiles · robust booleans'}
               </span>
             </div>

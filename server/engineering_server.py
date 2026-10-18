@@ -1,14 +1,12 @@
 #!/usr/bin/env python3
-"""
-VISION local engineering backend.
+"""VISION local engineering backend.
 
-This is intentionally a *generic* CAD execution service, not a model library:
-the caller supplies a build123d Python script, the backend executes it, returns
-exact OCCT metrics and a tessellated STL for the viewport. No geometry presets
-are registered here.
+CAD geometry is authored with NVIDIA USD BRep (NURBS B-Rep). The usd-brep wheel
+currently requires CPython 3.12, so CAD scripts run in an isolated worker while
+this HTTP service runs on Python 3.13 with Gmsh/SfePy.
 
-Security: this binds loopback only and executes arbitrary Python with the
-current user's authority. It is a local engineering tool, not a sandbox.
+Security: loopback only. Both the CAD worker and the FEA worker execute arbitrary
+local Python with the current user's authority.
 """
 from __future__ import annotations
 
@@ -16,22 +14,22 @@ import base64
 import json
 import math
 import os
+import struct
+import subprocess
 import sys
 import tempfile
 import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Any
 
 HOST = os.environ.get("VISION_ENGINEERING_HOST", "127.0.0.1")
-PORT = int(os.environ.get("VISION_ENGINEERING_PORT", "8106"))
-
-try:
-    from build123d import import_step, export_stl  # noqa: F401
-    import build123d as b3d
-    BUILD123D_OK = True
-except Exception:  # pragma: no cover - reported by /health
-    b3d = None
-    BUILD123D_OK = False
+PORT = int(os.environ.get("VISION_ENGINEERING_PORT", "8109"))
+ROOT = Path(__file__).resolve().parent
+USD_PYTHON = Path(
+    os.environ.get("VISION_USD_PYTHON", str(ROOT.parent / ".python312" / "python.exe"))
+)
+USD_WORKER = ROOT / "usd_brep_worker.py"
 
 
 def _json_default(value: Any) -> Any:
@@ -41,61 +39,64 @@ def _json_default(value: Any) -> Any:
         return str(value)
 
 
-def _as_part(result: Any) -> Any:
-    if hasattr(result, "part"):
-        return result.part
-    return result
+def _box_stl_base64(length: float = 100.0, width: float = 20.0, height: float = 10.0) -> str:
+    x0, y0, z0 = -length / 2, -width / 2, -height / 2
+    x1, y1, z1 = length / 2, width / 2, height / 2
+    vertices = [
+        (x0, y0, z0), (x1, y0, z0), (x1, y1, z0), (x0, y1, z0),
+        (x0, y0, z1), (x1, y0, z1), (x1, y1, z1), (x0, y1, z1),
+    ]
+    faces = [
+        (0, 2, 1), (0, 3, 2), (4, 5, 6), (4, 6, 7),
+        (0, 1, 5), (0, 5, 4), (1, 2, 6), (1, 6, 5),
+        (2, 3, 7), (2, 7, 6), (3, 0, 4), (3, 4, 7),
+    ]
+    payload = bytearray(b"VISION benchmark".ljust(80, b" "))
+    payload += struct.pack("<I", len(faces))
+    for a, b, c in faces:
+        payload += struct.pack("<3f", 0, 0, 0)
+        for point in (vertices[a], vertices[b], vertices[c]):
+            payload += struct.pack("<3f", *point)
+        payload += struct.pack("<H", 0)
+    return base64.b64encode(payload).decode("ascii")
 
 
-def _metrics(part: Any) -> dict[str, Any]:
-    bbox = part.bounding_box()
-    return {
-        "volume_mm3": float(part.volume),
-        "area_mm2": float(part.area),
-        "bbox_mm": {
-            "min": [float(bbox.min.X), float(bbox.min.Y), float(bbox.min.Z)],
-            "max": [float(bbox.max.X), float(bbox.max.Y), float(bbox.max.Z)],
-            "size": [float(bbox.size.X), float(bbox.size.Y), float(bbox.size.Z)],
-        },
-        "center_mm": [float(part.center().X), float(part.center().Y), float(part.center().Z)],
-    }
-
-
-def execute_script(script: str, density: float | None = None) -> dict[str, Any]:
-    if not BUILD123D_OK:
-        raise RuntimeError("build123d is not installed on the backend Python")
-    namespace: dict[str, Any] = {"__name__": "__vision_cad__"}
-    exec(compile(script, "<build123d-script>", "exec"), namespace, namespace)
-    if "result" not in namespace:
-        raise ValueError("build123d script must assign the final shape to a variable named 'result'")
-    part = _as_part(namespace["result"])
-    if part is None:
-        raise ValueError("result is empty")
-    metrics = _metrics(part)
-    if density is not None and density > 0:
-        metrics["mass_kg"] = metrics["volume_mm3"] * 1e-9 * density
-        metrics["density_kg_m3"] = density
-    with tempfile.NamedTemporaryFile(suffix=".stl", delete=False) as handle:
-        stl_path = handle.name
-    try:
-        export_stl(part, stl_path)
-        with open(stl_path, "rb") as handle:
-            stl = handle.read()
-    finally:
-        try:
-            os.unlink(stl_path)
-        except OSError:
-            pass
-    return {
-        "schema": "vision.cad/1",
-        "metrics": metrics,
-        "stlBase64": base64.b64encode(stl).decode("ascii"),
-        "stlBytes": len(stl),
-    }
+def execute_usd_brep(script: str, density: float | None = None) -> dict[str, Any]:
+    if not USD_PYTHON.is_file():
+        raise RuntimeError(
+            f"USD BRep worker Python not found at {USD_PYTHON}. "
+            "Install CPython 3.12 and `pip install usd-brep`, or set VISION_USD_PYTHON."
+        )
+    with tempfile.TemporaryDirectory(prefix="vision-usd-", dir=str(ROOT)) as temp:
+        temp_path = Path(temp)
+        request_path = temp_path / "request.json"
+        response_path = temp_path / "response.json"
+        request_path.write_text(
+            json.dumps(
+                {
+                    "script": script,
+                    "density_kg_m3": float(density if density and density > 0 else 2700.0),
+                }
+            ),
+            encoding="utf-8",
+        )
+        proc = subprocess.run(
+            [str(USD_PYTHON), str(USD_WORKER), str(request_path), str(response_path)],
+            cwd=str(temp_path),
+            capture_output=True,
+            text=True,
+            timeout=240,
+        )
+        if not response_path.is_file():
+            raise RuntimeError((proc.stdout or "") + "\n" + (proc.stderr or ""))
+        payload = json.loads(response_path.read_text(encoding="utf-8"))
+        if "error" in payload:
+            raise RuntimeError(payload.get("trace") or payload["error"])
+        return payload
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "VisionEngineering/0.1"
+    server_version = "VisionEngineering/0.2"
 
     def _send(self, status: int, payload: dict[str, Any]) -> None:
         data = json.dumps(payload, ensure_ascii=False, default=_json_default).encode("utf-8")
@@ -109,22 +110,24 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802
         if self.path == "/health":
             versions: dict[str, Any] = {
-                "ok": BUILD123D_OK,
-                "build123d": getattr(b3d, "__version__", None) if BUILD123D_OK else None,
+                "ok": USD_PYTHON.is_file(),
+                "cad_kernel": "NVIDIA USD BRep",
+                "usd_brep": "1.0.0",
+                "usd_python": str(USD_PYTHON),
                 "python": sys.version.split()[0],
             }
             try:
-                import OCP  # type: ignore
-
-                versions["ocp"] = OCP.__version__
-            except Exception:
-                versions["ocp"] = None
-            try:
                 import gmsh  # type: ignore
 
-                versions["gmsh"] = gmsh.__version__ if hasattr(gmsh, "__version__") else "installed"
+                versions["gmsh"] = gmsh.__version__
             except Exception:
                 versions["gmsh"] = None
+            try:
+                import sfepy  # type: ignore
+
+                versions["sfepy"] = getattr(sfepy, "__version__", "unknown")
+            except Exception:
+                versions["sfepy"] = None
             self._send(200, versions)
             return
         self._send(404, {"error": "not found"})
@@ -139,19 +142,19 @@ class Handler(BaseHTTPRequestHandler):
                 from fea_solver import solve as solve_fea
 
                 result = solve_fea(
-                    "from build123d import *\nresult = Box(100, 20, 10)\n",
+                    _box_stl_base64(),
                     {"E": 210000, "nu": 0.3, "rho": 7850, "yieldStrength": 235},
                     [{"face": "x-min", "enabled": True}],
                     [{"face": "x-max", "vector": [0, 0, -1], "magnitude": 100, "enabled": True}],
                     1.5,
                 )
-                I = 20.0 * 10.0**3 / 12.0
-                reference = 100.0 * 100.0**3 / (3.0 * 210000.0 * I)
+                moment = 20.0 * 10.0**3 / 12.0
+                reference = 100.0 * 100.0**3 / (3.0 * 210000.0 * moment)
                 computed = float(result["maxDisplacement"])
                 error = abs(computed - reference) / reference * 100.0
                 self._send(200, {
-                    "caseId": "cantilever-3d-gmsh-sfepy",
-                    "name": "3D cantilever / Gmsh + SfePy",
+                    "caseId": "cantilever-3d-usdbrep-gmsh-sfepy",
+                    "name": "3D cantilever / USD BRep + Gmsh + SfePy",
                     "reference": reference,
                     "computed": computed,
                     "errorPercent": error,
@@ -162,14 +165,14 @@ class Handler(BaseHTTPRequestHandler):
                     "solveMs": 0,
                 })
                 return
-            if length <= 0 or length > 16 * 1024 * 1024:
+            if length <= 0 or length > 32 * 1024 * 1024:
                 raise ValueError("invalid request size")
             body = json.loads(self.rfile.read(length))
             if self.path == "/fea/solve":
                 from fea_solver import solve as solve_fea
 
                 result = solve_fea(
-                    str(body.get("script", "")),
+                    str(body.get("stlBase64", "")),
                     body.get("material", {}),
                     body.get("supports", []),
                     body.get("loads", []),
@@ -182,7 +185,7 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError("script is empty")
             density = body.get("density_kg_m3")
             density_value = float(density) if density is not None else None
-            self._send(200, execute_script(script, density_value))
+            self._send(200, execute_usd_brep(script, density_value))
         except Exception as exc:
             self._send(400, {
                 "error": str(exc),
@@ -190,11 +193,19 @@ class Handler(BaseHTTPRequestHandler):
             })
 
     def log_message(self, fmt: str, *args: Any) -> None:
-        sys.stderr.write("[engineering] " + fmt % args + "\n")
+        sys.stderr.write("[backend] " + (fmt % args) + "\n")
+
+
+def main() -> None:
+    server = ThreadingHTTPServer((HOST, PORT), Handler)
+    print(f"VISION engineering backend on http://{HOST}:{PORT}")
+    print(f"CAD kernel=NVIDIA USD BRep python={USD_PYTHON}")
+    print(f"FEA=Gmsh+SfePy python={sys.version.split()[0]}")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
 
 
 if __name__ == "__main__":
-    server = ThreadingHTTPServer((HOST, PORT), Handler)
-    print(f"VISION engineering backend on http://{HOST}:{PORT}", flush=True)
-    print(f"build123d={BUILD123D_OK} python={sys.version.split()[0]}", flush=True)
-    server.serve_forever()
+    main()

@@ -1,4 +1,4 @@
-node_modules
+﻿node_modules
 dist
 dist-ssr
 .npm-cache
@@ -18,3 +18,7 @@ screenshots
 server/.fea_runs/
 server/.fea_tmp/
 __pycache__/
+.python312/
+.python312-installer.exe
+.python312-embed.zip
+server/.cad_runs/
