@@ -1,0 +1,12 @@
+node_modules
+dist
+dist-ssr
+.npm-cache
+.vite
+.edge-profile
+*.local
+*.log
+.DS_Store
+playwright-report
+test-results
+screenshots
