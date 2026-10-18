@@ -24,17 +24,17 @@ python -m pip install -r server/requirements.txt
 python server/engineering_server.py
 ```
 
-Default endpoint: `http://127.0.0.1:8103`. Override with
+Default endpoint: `http://127.0.0.1:8105`. Override with
 `VISION_ENGINEERING_HOST` / `VISION_ENGINEERING_PORT`.
 
 ```bash
-curl http://127.0.0.1:8103/health
+curl http://127.0.0.1:8105/health
 ```
 
 ## Execute a CAD script
 
 ```bash
-curl -s http://127.0.0.1:8103/cad/execute \
+curl -s http://127.0.0.1:8105/cad/execute \
   -H 'content-type: application/json' \
   -d '{"script":"from build123d import *\nresult = Box(20, 30, 40)","density_kg_m3":2700}'
 ```

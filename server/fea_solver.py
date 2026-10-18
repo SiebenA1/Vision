@@ -31,21 +31,51 @@ import numpy as nm
 WORK_ROOT = Path(__file__).resolve().parent / ".fea_runs"
 
 
-def _face_condition(face: str, bbox: list[float], tol: float) -> str:
-    xmin, ymin, zmin, xmax, ymax, zmax = bbox
-    if face == "x-min":
-        return f"x < {xmin + tol}"
-    if face == "x-max":
-        return f"x > {xmax - tol}"
-    if face == "y-min":
-        return f"y < {ymin + tol}"
-    if face == "y-max":
-        return f"y > {ymax - tol}"
-    if face == "z-min":
-        return f"z < {zmin + tol}"
-    if face == "z-max":
-        return f"z > {zmax - tol}"
-    raise ValueError(f"unsupported face {face}")
+def _face_axis(face: str, bbox: list[float]) -> tuple[int, float, int, float]:
+    if face.startswith("x"):
+        axis, span = 0, bbox[3] - bbox[0]
+        limit = bbox[3] if face.endswith("max") else bbox[0]
+    elif face.startswith("y"):
+        axis, span = 1, bbox[4] - bbox[1]
+        limit = bbox[4] if face.endswith("max") else bbox[1]
+    else:
+        axis, span = 2, bbox[5] - bbox[2]
+        limit = bbox[5] if face.endswith("max") else bbox[2]
+    sign = 1 if face.endswith("max") else -1
+    return axis, limit, sign, max(1e-4, span * 0.01)
+
+
+def _face_condition(face: str, bbox: list[float], band: float) -> str:
+    axis, limit, sign, _ = _face_axis(face, bbox)
+    op = ">" if sign > 0 else "<"
+    bound = limit - band if sign > 0 else limit + band
+    return f"{'xyz'[axis]} {op} {bound}"
+
+
+def _select_load_triangles(
+    points: nm.ndarray,
+    tris: nm.ndarray,
+    face: str,
+    bbox: list[float],
+    band: float,
+) -> tuple[nm.ndarray, float]:
+    axis, limit, sign, _ = _face_axis(face, bbox)
+    coords = points[tris, axis]
+    exact = tris[nm.all(sign * (coords - limit) >= -band, axis=1)]
+    area = sum(_triangle_area(points, tri) for tri in exact)
+    if area > 0:
+        return exact, float(area)
+    # Curved or sharp-end topology may not have a triangulated facet exactly on
+    # the extreme plane. Select the boundary band around the extreme.
+    centroids = points[tris].mean(axis=1)[:, axis]
+    near = tris[sign * (centroids - limit) >= -band]
+    area = sum(_triangle_area(points, tri) for tri in near)
+    if area > 0:
+        return near, float(area)
+    raise ValueError(
+        f"load face {face} has no boundary facets within {band:.4f} mm; "
+        f"bbox={bbox}"
+    )
 
 
 def _mesh_from_step(step_path: Path, mesh_path: Path, mesh_size: float) -> dict[str, Any]:
@@ -172,25 +202,17 @@ def _solve_impl(
     tets = mesh["tets"]
     tris = mesh["tris"]
     bbox = mesh["bbox"]
-    tol = max(1e-6, (bbox[3] - bbox[0]) * 1e-5)
 
     support = next((item for item in supports if item.get("enabled", True)), None) or supports[0]
     load = next((item for item in loads if item.get("enabled", True)), None) or loads[0]
-    fixed_desc = _face_condition(str(support.get("face", "x-min")), bbox, tol)
-    load_desc = _face_condition(str(load.get("face", "x-max")), bbox, tol)
+    fixed_face = str(support.get("face", "x-min"))
     load_face = str(load.get("face", "x-max"))
-    # Select boundary triangles belonging to the load face.
-    if load_face.startswith("x"):
-        axis, limit = 0, bbox[3] if load_face.endswith("max") else bbox[0]
-    elif load_face.startswith("y"):
-        axis, limit = 1, bbox[4] if load_face.endswith("max") else bbox[1]
-    else:
-        axis, limit = 2, bbox[5] if load_face.endswith("max") else bbox[2]
-    sign = 1 if load_face.endswith("max") else -1
-    selected = tris[nm.all(sign * (points[tris, axis] - limit) >= -tol, axis=1)]
-    area = sum(_triangle_area(points, tri) for tri in selected)
+    _, _, _, load_band = _face_axis(load_face, bbox)
+    fixed_desc = _face_condition(fixed_face, bbox, _face_axis(fixed_face, bbox)[3])
+    load_desc = _face_condition(load_face, bbox, load_band)
+    selected, area = _select_load_triangles(points, tris, load_face, bbox, load_band)
     if area <= 0:
-        raise ValueError("load face has no boundary area")
+        raise ValueError(f"load face {load_face} has no boundary area")
     force = nm.asarray(load.get("vector", [0, 0, -1]), dtype=nm.float64)
     force = force / max(1e-12, nm.linalg.norm(force)) * float(load.get("magnitude", 0))
     traction = force / area
