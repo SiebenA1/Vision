@@ -502,9 +502,11 @@ export function ModelPanel() {
                 ? '版本'
                 : blank
                   ? '空白工程'
-                  : (model.template ?? 'bracket') === 'csg'
-                    ? 'CSG 特征模型'
-                    : '参数化支架'}
+                  : (model.template ?? 'bracket') === 'blade'
+                    ? '风电叶片'
+                    : (model.template ?? 'bracket') === 'csg'
+                      ? 'CSG 特征模型'
+                      : '参数化支架'}
           </h2>
         </div>
         <div className="model-panel__head-right">

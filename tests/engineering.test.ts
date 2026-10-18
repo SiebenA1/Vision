@@ -7,7 +7,7 @@ import { getMaterial } from '../src/core/materials';
 import { parseEngineeringPrompt } from '../src/core/agent/nlu';
 import { buildDeepSeekTools, directionVector } from '../src/core/llm/tools';
 import { isModelDocument, nextProjectCode, seedProjects } from '../src/core/projects';
-import { createBlankModel, createStarterModel, createBrakePedalModel } from '../src/core/templates';
+import { createBlankModel, createStarterModel, createBrakePedalModel, createWindBladeModel } from '../src/core/templates';
 
 describe('parametric geometry kernel', () => {
   it('builds a watertight bracket with positive volume', async () => {
@@ -107,6 +107,13 @@ describe('natural language intent parsing', () => {
     expect(plan.actions[0].tool).toBe('generate_preset');
     expect(plan.actions[0].args.preset).toBe('brake-pedal');
   });
+
+  it('maps a wind-blade prompt to the blade loft preset', () => {
+    const plan = parseEngineeringPrompt('帮我建模一个风电的扇叶', BRACKET_MODEL);
+    expect(plan.intent).toBe('modeling');
+    expect(plan.actions[0].tool).toBe('generate_preset');
+    expect(plan.actions[0].args.preset).toBe('wind-blade');
+  });
 });
 
 describe('DeepSeek tool contract', () => {
@@ -138,12 +145,13 @@ describe('DeepSeek tool contract', () => {
 });
 
 describe('project library', () => {
-  it('seeds four distinct engineering projects', () => {
+  it('seeds five distinct engineering projects', () => {
     const projects = seedProjects();
-    expect(projects).toHaveLength(4);
-    expect(new Set(projects.map((project) => project.model.code)).size).toBe(4);
+    expect(projects).toHaveLength(5);
+    expect(new Set(projects.map((project) => project.model.code)).size).toBe(5);
     expect(projects.some((project) => project.model.code === 'BRK-042-L')).toBe(true);
     expect(projects.some((project) => project.model.code === 'PEDAL-01')).toBe(true);
+    expect(projects.some((project) => project.model.code === 'WT-01')).toBe(true);
     expect(isModelDocument(projects[0].model)).toBe(true);
     expect(isModelDocument({ schema: 'wrong' })).toBe(false);
     expect(nextProjectCode(projects).startsWith('BRK-')).toBe(true);
@@ -191,5 +199,17 @@ describe('project library', () => {
     expect(geometry.triangleCount).toBeGreaterThan(100);
     expect(geometry.bbox.max[0]).toBeGreaterThan(200);
     expect(featureLog.length).toBe(16);
+  }, 60_000);
+
+  it('lofts a watertight wind-turbine blade', async () => {
+    const model = createWindBladeModel();
+    expect(model.template).toBe('blade');
+    expect(model.variables.length).toBe(6);
+    const { geometry, featureLog } = await buildGeometry(model);
+    expect(geometry.volumeMm3).toBeGreaterThan(0);
+    expect(geometry.triangleCount).toBeGreaterThan(400);
+    expect(geometry.bbox.max[0]).toBeCloseTo(1800, 0);
+    expect(geometry.bbox.max[1]).toBeGreaterThan(80);
+    expect(featureLog.some((entry) => entry.includes('NACA'))).toBe(true);
   }, 60_000);
 });

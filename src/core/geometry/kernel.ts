@@ -135,6 +135,162 @@ function hashDocument(model: ModelDocument): string {
   return (hash >>> 0).toString(16).padStart(8, '0').toUpperCase();
 }
 
+function bladeSection(chord: number, thickness: number, camber: number, twistDeg: number, segments: number): Array<[number, number, number]> {
+  const upper: Array<[number, number, number]> = [];
+  const lower: Array<[number, number, number]> = [];
+  const theta = (twistDeg * Math.PI) / 180;
+  const cos = Math.cos(theta);
+  const sin = Math.sin(theta);
+  const camberPos = 0.4;
+  for (let j = 0; j <= segments; j += 1) {
+    const u = j / segments;
+    const yt =
+      5 *
+      thickness *
+      (0.2969 * Math.sqrt(u) - 0.126 * u - 0.3516 * u * u + 0.2843 * u * u * u - 0.1036 * u * u * u * u);
+    let yc = 0;
+    let slope = 0;
+    if (camber > 1e-6) {
+      if (u < camberPos) {
+        yc = (camber / (camberPos * camberPos)) * (2 * camberPos * u - u * u);
+        slope = (2 * camber / (camberPos * camberPos)) * (camberPos - u);
+      } else {
+        yc = (camber / ((1 - camberPos) * (1 - camberPos))) * (1 - 2 * camberPos + 2 * camberPos * u - u * u);
+        slope = (2 * camber / ((1 - camberPos) * (1 - camberPos))) * (camberPos - u);
+      }
+    }
+    const angle = Math.atan(slope);
+    const upperX = (u - yt * Math.sin(angle) - 0.5) * chord;
+    const upperY = (yc + yt * Math.cos(angle)) * chord;
+    const lowerX = (u + yt * Math.sin(angle) - 0.5) * chord;
+    const lowerY = (yc - yt * Math.cos(angle)) * chord;
+    upper.push([upperX * cos - upperY * sin, upperX * sin + upperY * cos, 0]);
+    lower.push([lowerX * cos - lowerY * sin, lowerX * sin + lowerY * cos, 0]);
+  }
+  const ring: Array<[number, number, number]> = [];
+  for (let j = 0; j <= segments; j += 1) ring.push(upper[j]);
+  for (let j = segments - 1; j >= 1; j -= 1) ring.push(lower[j]);
+  return ring;
+}
+
+async function buildBladeGeometry(
+  model: ModelDocument,
+  started: number,
+): Promise<{ geometry: GeometryData; featureLog: string[] }> {
+  const value = (key: string, fallback: number) => model.variables.find((item) => item.key === key)?.value ?? fallback;
+  const length = Math.max(200, value('bladeLength', 1800));
+  const rootDiameter = Math.max(40, value('rootDiameter', 140));
+  const maxChord = Math.max(rootDiameter * 0.55, value('maxChord', 170));
+  const rootTwist = value('rootTwist', 16);
+  const tipTwist = value('tipTwist', 0);
+  const thicknessPct = Math.max(10, Math.min(45, value('maxThicknessPct', 28))) / 100;
+  const sections = [
+    { s: 0, chord: rootDiameter, tr: 0.92, camber: 0 },
+    { s: 0.06, chord: rootDiameter + (maxChord - rootDiameter) * 0.3, tr: 0.66, camber: 0.012 },
+    { s: 0.18, chord: maxChord, tr: 0.43, camber: 0.035 },
+    { s: 0.32, chord: maxChord * 0.94, tr: 0.34, camber: 0.045 },
+    { s: 0.52, chord: maxChord * 0.68, tr: 0.27, camber: 0.042 },
+    { s: 0.7, chord: maxChord * 0.48, tr: 0.21, camber: 0.032 },
+    { s: 0.86, chord: maxChord * 0.3, tr: 0.16, camber: 0.02 },
+    { s: 1, chord: Math.max(6, maxChord * 0.09), tr: 0.1, camber: 0.008 },
+  ];
+  const segments = 28;
+  const ringSize = 2 * segments;
+  const positions: number[] = [];
+  const rings: number[][] = [];
+  const twistAt = (s: number) => rootTwist + (tipTwist - rootTwist) * Math.pow(s, 0.85);
+  for (const section of sections) {
+    const ratio = Math.min(0.98, Math.max(0.06, section.tr * (thicknessPct / 0.28)));
+    const ring = bladeSection(section.chord, ratio, section.camber, twistAt(section.s), segments);
+    const indices: number[] = [];
+    for (const [y, z] of ring) {
+      indices.push(positions.length / 3);
+      positions.push(section.s * length, y, z);
+    }
+    rings.push(indices);
+  }
+  const indices: number[] = [];
+  for (let i = 0; i < rings.length - 1; i += 1) {
+    for (let j = 0; j < ringSize; j += 1) {
+      const a = rings[i][j];
+      const b = rings[i][(j + 1) % ringSize];
+      const c = rings[i + 1][j];
+      const d = rings[i + 1][(j + 1) % ringSize];
+      indices.push(a, c, b, b, c, d);
+    }
+  }
+  const cap = (ring: number[]) => {
+    const center = positions.length / 3;
+    const y = ring.reduce((sum, index) => sum + positions[index * 3 + 1], 0) / ring.length;
+    const z = ring.reduce((sum, index) => sum + positions[index * 3 + 2], 0) / ring.length;
+    positions.push(ring === rings[0] ? 0 : length, y, z);
+    for (let j = 0; j < ring.length; j += 1) {
+      indices.push(center, ring[j], ring[(j + 1) % ring.length]);
+    }
+  };
+  cap(rings[0]);
+  cap(rings[rings.length - 1]);
+
+  const vertices = new Float32Array(positions);
+  let signedVolume = 0;
+  for (let i = 0; i < indices.length; i += 3) {
+    const a = indices[i] * 3;
+    const b = indices[i + 1] * 3;
+    const c = indices[i + 2] * 3;
+    signedVolume +=
+      (vertices[a] * (vertices[b + 1] * vertices[c + 2] - vertices[b + 2] * vertices[c + 1]) +
+        vertices[a + 1] * (vertices[b + 2] * vertices[c] - vertices[b] * vertices[c + 2]) +
+        vertices[a + 2] * (vertices[b] * vertices[c + 1] - vertices[b + 1] * vertices[c])) /
+      6;
+  }
+  if (signedVolume < 0) {
+    for (let i = 0; i < indices.length; i += 3) {
+      const tmp = indices[i + 1];
+      indices[i + 1] = indices[i + 2];
+      indices[i + 2] = tmp;
+    }
+  }
+  let area = 0;
+  const min: [number, number, number] = [Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY];
+  const max: [number, number, number] = [Number.NEGATIVE_INFINITY, Number.NEGATIVE_INFINITY, Number.NEGATIVE_INFINITY];
+  for (let i = 0; i < vertices.length; i += 3) {
+    for (let axis = 0; axis < 3; axis += 1) {
+      min[axis] = Math.min(min[axis], vertices[i + axis]);
+      max[axis] = Math.max(max[axis], vertices[i + axis]);
+    }
+  }
+  for (let i = 0; i < indices.length; i += 3) {
+    const a = indices[i] * 3;
+    const b = indices[i + 1] * 3;
+    const c = indices[i + 2] * 3;
+    const abx = vertices[b] - vertices[a];
+    const aby = vertices[b + 1] - vertices[a + 1];
+    const abz = vertices[b + 2] - vertices[a + 2];
+    const acx = vertices[c] - vertices[a];
+    const acy = vertices[c + 1] - vertices[a + 1];
+    const acz = vertices[c + 2] - vertices[a + 2];
+    area += 0.5 * Math.hypot(aby * acz - abz * acy, abz * acx - abx * acz, abx * acy - aby * acx);
+  }
+  return {
+    geometry: {
+      positions: vertices,
+      indices: new Uint32Array(indices),
+      bbox: { min, max },
+      volumeMm3: Math.abs(signedVolume),
+      areaMm2: area,
+      triangleCount: indices.length / 3,
+      vertexCount: vertices.length / 3,
+      buildMs: performance.now() - started,
+      watermark: hashDocument(model),
+    },
+    featureLog: [
+      `BLADE · ${sections.length} NACA sections / ${segments * 2} ring points`,
+      `TWIST · ${rootTwist.toFixed(1)}° → ${tipTwist.toFixed(1)}°`,
+      `CAP · root / tip watertight`,
+    ],
+  };
+}
+
 async function buildCsgGeometry(
   model: ModelDocument,
   started: number,
@@ -311,6 +467,9 @@ export async function buildGeometry(model: ModelDocument): Promise<{
 }> {
   const started = performance.now();
   const template = model.template ?? 'bracket';
+  if (template === 'blade') {
+    return buildBladeGeometry(model, started);
+  }
   if (template === 'csg') {
     return buildCsgGeometry(model, started);
   }

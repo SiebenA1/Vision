@@ -127,7 +127,7 @@ export function voxelMesh(geometry: GeometryData, targetElements: number, fixedC
   const maxCells = 180_000;
   const minH = Math.cbrt(bboxVolume / maxCells);
   h = Math.max(h, minH);
-  h = Math.max(h, Math.max(spanX, spanY, spanZ) / 90);
+  h = Math.max(h, Math.max(spanX, spanY, spanZ) / 150);
   const nx = Math.max(3, Math.ceil(spanX / h));
   const ny = Math.max(3, Math.ceil(spanY / h));
   const nz = Math.max(3, Math.ceil(spanZ / h));

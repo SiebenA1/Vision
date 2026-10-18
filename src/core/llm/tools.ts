@@ -211,13 +211,13 @@ export function buildDeepSeekTools(model: ModelDocument): DeepSeekTool[] {
       function: {
         name: 'generate_preset',
         description:
-          '生成一个完整的多特征工程模型并作为新项目打开。brake-pedal 生成刹车踏板支架：安装背板、双侧叉板、加强筋、枢轴座、踏板臂、安装孔与减重孔。需要复杂拓扑而非只改现有参数时使用。',
+          '生成一个完整的多特征工程模型并作为新项目打开。brake-pedal 生成刹车踏板支架；wind-blade 生成由 NACA 翼型截面放样、带弦长/扭转/厚度分布的风电叶片。需要复杂拓扑而非只改现有参数时使用。',
         parameters: {
           type: 'object',
           properties: {
             preset: {
               type: 'string',
-              enum: ['brake-pedal'],
+              enum: ['brake-pedal', 'wind-blade'],
               description: 'Engineering preset id.',
             },
             reason: {

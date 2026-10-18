@@ -134,6 +134,23 @@ The brake-pedal preset (`createBrakePedalModel`) is a 16-feature graph: wall pla
 
 The feature builder UI edits the same graph. It is deliberately CSG, not a NURBS B-Rep sketcher: there are no sketch constraints, lofts, sweeps, fillets or assemblies yet. The app labels this boundary in the README and UI rather than presenting the result as a production CAD kernel.
 
+### 3.4 Parametric blade loft
+
+A `template: 'blade'` model uses `buildBladeGeometry()` instead of CSG. The generator:
+
+1. creates eight NACA 4-digit section rings with thickness and camber;
+2. applies chord, twist and span position for each section;
+3. connects adjacent rings with quads split into triangles;
+4. closes the root and tip with triangle fans;
+5. computes signed volume and flips the winding if it is negative;
+6. returns a watertight `GeometryData` with a model hash.
+
+The blade is not voxelized from primitives; it is a surface loft. The FE path consumes the same `GeometryData` as the bracket and CSG models, so the C3D8 voxel mesher and PCG solver are unchanged. Mesh refinement now allows 150 cells along the largest span, which keeps a 1.8 m blade at h ≈ 12 mm while still capping the grid at 180k nodes.
+
+The wind-blade preset (`createWindBladeModel`) exposes six design variables: blade length, root diameter, max chord, root twist, tip twist and max thickness ratio. It is still an isotropic solid model; composite layups and anisotropic failure criteria are explicitly out of scope.
+
+Natural-language routing is a preset/tool boundary, not an LLM-generated mesh. `generate_preset` supports `brake-pedal` and `wind-blade`; `add_solid_feature` incrementally edits CSG models. A general B-Rep/typed model IR is the next architectural step if arbitrary physical models are required.
+
 ## 4. Geometry build
 
 `src/core/geometry/kernel.ts`

@@ -145,7 +145,7 @@ function toolAction(call: DeepSeekToolCall): AgentAction {
   }
   if (name === 'generate_preset') {
     const preset = String(args.preset ?? '');
-    if (preset !== 'brake-pedal') throw new Error(`未知预设：${preset}`);
+    if (!['brake-pedal', 'wind-blade'].includes(preset)) throw new Error(`未知预设：${preset}`);
     return {
       tool: 'generate_preset',
       args: { preset, reason: String(args.reason ?? '') },

@@ -3,7 +3,7 @@ export interface MaterialSpec {
   name: string;
   shortName: string;
   standard: string;
-  family: 'aluminium' | 'steel' | 'titanium' | 'polymer';
+  family: 'aluminium' | 'steel' | 'titanium' | 'polymer' | 'composite';
   E: number;
   nu: number;
   rho: number;
@@ -109,6 +109,23 @@ export const MATERIALS: MaterialSpec[] = [
     note: '各向同性等效模型；纤维取向与实际打印方向会显著影响强度。',
     validated: false,
   },
+  {
+    id: 'CFRP-EPOXY',
+    name: '碳纤维增强环氧复合材料',
+    shortName: 'CFRP',
+    standard: '等效各向同性 / 初步选型',
+    family: 'composite',
+    E: 70_000,
+    nu: 0.3,
+    rho: 1600,
+    yieldStrength: 600,
+    ultimateStrength: 800,
+    thermalExpansion: 2e-6,
+    color: '#7f8f92',
+    finish: '碳纤维编织 / 清漆',
+    note: '仅用于各向同性等效初步分析；实际层合板需定义铺层、方向与失效准则。',
+    validated: false,
+  },
 ];
 
 export const DEFAULT_MATERIAL_ID = 'AL6061-T6';
@@ -132,8 +149,9 @@ export function materialOptionsByFamily(): Array<{ family: string; label: string
     steel: '钢',
     titanium: '钛合金',
     polymer: '聚合物',
+    composite: '复合材料',
   };
-  return (['aluminium', 'steel', 'titanium', 'polymer'] as const).map((family) => ({
+  return (['aluminium', 'steel', 'titanium', 'polymer', 'composite'] as const).map((family) => ({
     family,
     label: labels[family],
     items: MATERIALS.filter((material) => material.family === family),

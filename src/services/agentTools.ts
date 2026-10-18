@@ -42,7 +42,7 @@ export function labelForAction(action: AgentAction): string {
     case 'export_report':
       return '生成工程校核报告';
     case 'generate_preset':
-      return '生成刹车踏板支架 CSG 模型';
+      return '生成工程预设模型';
     case 'add_solid_feature':
       return `添加 ${action.args.shape ?? '实体'} 特征`;
     default:
@@ -139,6 +139,23 @@ export function riskNarrative(): string {
       result.warnings.length ? `自动检查提示：${result.warnings[0]}` : '自动检查未发现平衡或收敛异常。',
     ].join('\n\n');
   }
+  if (model.template === 'blade') {
+    const bladeLength = model.variables.find((variable) => variable.key === 'bladeLength')?.value ?? 1800;
+    let region = '叶片中段主梁 / 蒙皮过渡区';
+    if (x <= bladeLength * 0.12) region = '叶根圆角与连接区';
+    else if (x >= bladeLength * 0.8) region = '叶尖薄壁区';
+    else if (Math.abs(y) > 25) region = '前缘/后缘与主梁帽交界';
+    if (result.maxDisplacement > bladeLength * 0.006) drivers.push('展向弯曲刚度');
+    if (result.safetyFactor < 1.8) drivers.push('叶根弯曲与扭转耦合');
+    if (Math.abs(y) > 25) drivers.push('薄壁蒙皮局部屈曲/剪切');
+    if (drivers.length === 0) drivers.push('叶根连接与主梁帽应力集中');
+    return [
+      `热点位于 **${region}**，坐标 (${fmt(x, 1)}, ${fmt(y, 1)}, ${fmt(z, 1)}) mm。`,
+      `峰值 von Mises **${fmt(result.maxVonMises, 1)} MPa**，对应安全系数 **${fmt(result.safetyFactor, 2)}**；距等效屈服点仍有 ${fmt(margin, 1)}% 的裕度。`,
+      `当前控制因素：${drivers.join('、')}。该模型是各向同性等效实体，未模拟 CFRP 铺层、纤维方向、蒙皮-主梁胶接和疲劳；结果只能用于初步传力路径判断。`,
+      result.warnings.length ? `自动检查提示：${result.warnings[0]}` : '自动检查未发现平衡或收敛异常。',
+    ].join('\n\n');
+  }
   let region = '悬臂中段 / 截面过渡区';
   if (x <= wallThickness * 2.6) region = '背板与悬臂根部过渡区';
   else if (x >= armLength * 0.8) region = '端部承力环与销孔边缘';
@@ -188,6 +205,9 @@ function actionResultSummary(action: AgentAction): string {
   }
   if (action.tool === 'generate_preset') {
     const model = useAppStore.getState().model;
+    if (model.template === 'blade') {
+      return `已生成 **${model.code} · ${model.name}**。NACA 翼型 8 截面放样、弦长/扭转/厚度分布已重建为 watertight 几何。\n\n下一步可以运行基线校核，或调整叶片长度、弦长、扭角和厚度比。`;
+    }
     return `已生成 **${model.code} · ${model.name}**。CSG 特征图包含 **${model.solidFeatures?.length ?? 0} 个特征**（安装背板、叉板、加强筋、枢轴座、踏板臂及减重/安装孔），watertight 几何已重建。\n\n下一步可以运行基线校核，或继续添加/切除实体特征。`;
   }
   if (action.tool === 'add_solid_feature') {
@@ -202,11 +222,16 @@ export async function executeTool(action: AgentAction, lastResultRef: LastResult
   let detail = '';
   let summary = '';
   if (action.tool === 'generate_preset') {
-    store.createBrakePedalProject(true);
+    const preset = String(action.args.preset ?? '');
+    if (preset === 'wind-blade') {
+      store.createWindBladeProject(true);
+    } else {
+      store.createBrakePedalProject(true);
+    }
     await wait(60);
     const geometry = await useAppStore.getState().rebuildGeometry();
-    if (!geometry) throw new Error(useAppStore.getState().geometryError ?? 'CSG 几何重建失败');
-    detail = `${useAppStore.getState().model.solidFeatures?.length ?? 0} CSG features · watertight`;
+    if (!geometry) throw new Error(useAppStore.getState().geometryError ?? '几何重建失败');
+    detail = `${useAppStore.getState().model.variables.length} variables · watertight`;
     summary = actionResultSummary(action);
     lastResultRef.value = null;
   } else if (action.tool === 'add_solid_feature') {

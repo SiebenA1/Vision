@@ -230,6 +230,135 @@ function solid(
 }
 
 /**
+ * A parametric wind-turbine blade built by lofting NACA sections along the span.
+ */
+export function createWindBladeModel(code = 'WT-01', name = '风电叶片'): ModelDocument {
+  const variables: DesignVariable[] = [
+    {
+      key: 'bladeLength',
+      label: '叶片长度',
+      labelEn: 'Blade length',
+      value: 1800,
+      min: 500,
+      max: 5000,
+      step: 10,
+      unit: 'mm',
+      group: '主控尺寸',
+      role: 'primary',
+    },
+    {
+      key: 'rootDiameter',
+      label: '叶根直径',
+      labelEn: 'Root diameter',
+      value: 160,
+      min: 60,
+      max: 400,
+      step: 2,
+      unit: 'mm',
+      group: '连接结构',
+      role: 'primary',
+    },
+    {
+      key: 'maxChord',
+      label: '最大弦长',
+      labelEn: 'Max chord',
+      value: 260,
+      min: 60,
+      max: 500,
+      step: 2,
+      unit: 'mm',
+      group: '主控尺寸',
+      role: 'primary',
+    },
+    {
+      key: 'rootTwist',
+      label: '叶根扭角',
+      labelEn: 'Root twist',
+      value: 18,
+      min: 0,
+      max: 30,
+      step: 0.5,
+      unit: 'deg',
+      group: '主控尺寸',
+      role: 'secondary',
+    },
+    {
+      key: 'tipTwist',
+      label: '叶尖扭角',
+      labelEn: 'Tip twist',
+      value: 2,
+      min: -5,
+      max: 10,
+      step: 0.5,
+      unit: 'deg',
+      group: '主控尺寸',
+      role: 'secondary',
+    },
+    {
+      key: 'maxThicknessPct',
+      label: '最大厚度比',
+      labelEn: 'Max thickness',
+      value: 30,
+      min: 12,
+      max: 45,
+      step: 1,
+      unit: '%',
+      group: '主控尺寸',
+      role: 'secondary',
+    },
+  ];
+  const model = cloneModel(BRACKET_MODEL);
+  model.id = `mdl_${Date.now().toString(36)}`;
+  model.code = code;
+  model.name = name;
+  model.subtitle = 'Wind turbine blade / NACA section loft';
+  model.revision = 'R01';
+  model.template = 'blade';
+  model.materialId = 'CFRP-EPOXY';
+  model.variables = variables;
+  model.features = [
+    {
+      id: 'blade_loft',
+      index: '01',
+      name: '叶片放样',
+      nameEn: 'BLADE LOFT',
+      kind: 'solid',
+      operation: 'add',
+      description: 'NACA 翼型 · 8 截面 · 弦长/扭转/厚度分布',
+      variableKeys: variables.map((variable) => variable.key),
+      quality: 'primary',
+    },
+  ];
+  delete model.solidFeatures;
+  model.supports = [
+    {
+      id: 'sup_root',
+      name: '叶根固定',
+      face: 'x-min',
+      type: 'fixed',
+      enabled: true,
+    },
+  ];
+  model.loads = [
+    {
+      id: 'load_tip',
+      name: '叶尖气动载荷',
+      face: 'x-max',
+      vector: [0, 0, -1],
+      magnitude: 500,
+      enabled: true,
+      description: '叶尖等效下压载荷 · 500 N',
+    },
+  ];
+  model.mesh = { ...model.mesh, cellSizeMm: 12 };
+  model.meta.created = new Date().toISOString().slice(0, 10);
+  model.meta.client = 'VISION Wind Systems';
+  model.meta.designIntent =
+    '风电叶片初步模型：叶根固定，NACA 翼型沿展向放样并逐渐扭转/收弦；500 N 叶尖等效载荷用于验证悬臂弯曲与叶根连接。当前为各向同性等效，未模拟铺层。';
+  return model;
+}
+
+/**
  * A brake-pedal bracket assembled from a CSG feature graph:
  * wall plate → side cheeks → gussets → pivot boss → pedal lever → subtractive holes.
  */

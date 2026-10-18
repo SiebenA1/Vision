@@ -2,7 +2,7 @@ export type Vec3 = [number, number, number];
 export type Axis = 'x' | 'y' | 'z';
 export type FaceId = 'x-min' | 'x-max' | 'y-min' | 'y-max' | 'z-min' | 'z-max';
 export type UnitSystem = 'mm-N-MPa';
-export type GeometryTemplate = 'bracket' | 'plate' | 'block' | 'cylinder' | 'csg' | 'empty';
+export type GeometryTemplate = 'bracket' | 'plate' | 'block' | 'cylinder' | 'blade' | 'csg' | 'empty';
 export type SolidShape = 'box' | 'cylinder' | 'sphere';
 export type SolidOperation = 'add' | 'subtract' | 'intersect';
 
@@ -31,7 +31,7 @@ export interface DesignVariable {
   min: number;
   max: number;
   step: number;
-  unit: 'mm' | 'deg' | 'mm²';
+  unit: 'mm' | 'deg' | 'mm²' | '%';
   group: VariableGroup;
   role: VariableRole;
   precision?: number;

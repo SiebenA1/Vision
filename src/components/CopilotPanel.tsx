@@ -150,6 +150,7 @@ function Message({ message, onChip, busy }: { message: ChatMessage; onChip: (tex
 }
 
 const SUGGESTIONS = [
+  { label: '风电叶片', prompt: '帮我建模一个风电的扇叶，NACA 翼型沿展向放样，带扭角和弦长分布。' },
   { label: '刹车踏板支架', prompt: '帮我建模一个刹车踏板支架，包含安装背板、双侧叉板、枢轴座和踏板臂。' },
   { label: '基线校核', prompt: '运行一次基线校核，并解释最大应力出现的位置。' },
   { label: '轻量化优化', prompt: '以质量最小为目标，安全系数不低于 2.0，位移不超过 2.0 mm，优化悬臂厚度。' },

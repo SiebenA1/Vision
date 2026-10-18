@@ -347,7 +347,9 @@ export function SceneViewport({
       top: new THREE.Vector3(0.001, 0, 1).normalize(),
       side: new THREE.Vector3(1, 0, 0.05).normalize(),
     };
-    const dir = dirs[preset];
+    const dir = preset === 'iso' && model.template === 'blade'
+      ? new THREE.Vector3(0.52, -1.05, 0.58).normalize()
+      : dirs[preset];
     camera.up.set(0, 0, 1);
     if (preset === 'top') camera.up.set(0, 1, 0);
     camera.position.copy(center).addScaledVector(dir, radius * 3.55);

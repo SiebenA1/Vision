@@ -20,6 +20,12 @@ const VARIABLE_ALIASES: VariableAlias[] = [
   { keys: ['mountHoleInset'], aliases: ['安装孔边距', '孔边距'] },
   { keys: ['lighteningHoleDia'], aliases: ['减重孔直径', '减重孔', '轻量化孔', 'lightening'] },
   { keys: ['tipHoleDia'], aliases: ['端部销孔直径', '销孔直径', '销孔', 'pin hole'] },
+  { keys: ['bladeLength'], aliases: ['叶片长度', '叶长', 'blade length'] },
+  { keys: ['rootDiameter'], aliases: ['叶根直径', '根部直径', 'root diameter'] },
+  { keys: ['maxChord'], aliases: ['最大弦长', '弦长', 'max chord', 'chord'] },
+  { keys: ['rootTwist'], aliases: ['叶根扭角', '根部扭角', 'root twist'] },
+  { keys: ['tipTwist'], aliases: ['叶尖扭角', 'tip twist'] },
+  { keys: ['maxThicknessPct'], aliases: ['最大厚度比', '厚度比', 'thickness ratio'] },
 ];
 
 const GENERIC_ALIASES: Array<{ key: string; alias: string }> = [
@@ -82,6 +88,7 @@ function findMaterial(text: string): string | null {
   if (/6061|6061-t6|铝|alum/.test(text)) return 'AL6061-T6';
   if (/4340|钢|steel/.test(text)) return 'STEEL-4340';
   if (/tc4|ti-?6al-?4v|钛|titan/.test(text)) return 'TI64';
+  if (/碳纤维|cfrp|carbon/.test(text)) return 'CFRP-EPOXY';
   if (/pa12|尼龙|nylon/.test(text)) return 'PA12-GF';
   return null;
 }
@@ -156,7 +163,7 @@ function actionLabel(action: AgentAction): string {
     case 'export_report':
       return '生成工程校核报告';
     case 'generate_preset':
-      return '生成刹车踏板支架 CSG 模型';
+      return '生成工程预设模型';
     case 'add_solid_feature':
       return '添加 CSG 实体特征';
     default:
@@ -164,24 +171,40 @@ function actionLabel(action: AgentAction): string {
   }
 }
 
-function brakePedalPlan(): AgentPlan {
+function presetPlan(preset: string, summary: string): AgentPlan {
   return {
     intent: 'modeling',
-    summary:
-      '将生成一个由 16 个 CSG 特征组成的刹车踏板支架：安装背板、双侧叉板、加强筋、枢轴座、踏板臂与安装/减重孔，然后重建 watertight 几何。',
+    summary,
     actions: [
       {
         tool: 'generate_preset',
-        args: { preset: 'brake-pedal' },
-        label: '生成刹车踏板支架 CSG 模型',
+        args: { preset },
+        label: '生成工程预设模型',
       },
     ],
     confidence: 0.97,
   };
 }
 
+function brakePedalPlan(): AgentPlan {
+  return presetPlan(
+    'brake-pedal',
+    '将生成一个由 16 个 CSG 特征组成的刹车踏板支架：安装背板、双侧叉板、加强筋、枢轴座、踏板臂与安装/减重孔，然后重建 watertight 几何。',
+  );
+}
+
+function windBladePlan(): AgentPlan {
+  return presetPlan(
+    'wind-blade',
+    '将生成一个风电叶片：NACA 翼型沿展向 8 截面放样，弦长、厚度与扭角逐段变化，叶根固定、叶尖受载，并重建 watertight 几何。',
+  );
+}
+
 export function parseEngineeringPrompt(prompt: string, model: ModelDocument): AgentPlan {
   const text = normalize(prompt);
+  if (/(风电|风机|风力|wind).*(叶片|扇叶|blade)|(叶片|扇叶).*(风电|风机)|(风电|风机).*(blade)/.test(text)) {
+    return windBladePlan();
+  }
   if (/(刹车|制动|brake).*(踏板|pedal)|(踏板|pedal).*(支架|bracket)|(刹车|制动).*(支架|bracket)/.test(text)) {
     return brakePedalPlan();
   }
