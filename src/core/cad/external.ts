@@ -1,10 +1,13 @@
+import type { CadArtifact } from './types';
 import type { GeometryMetrics, ModelDocument } from '../types';
+import { getMaterial, massFromVolume } from '../materials';
 import { createBlankProjectModel } from '../projects';
 
 export interface ExternalModelInput {
   name: string;
   code?: string;
   newProject?: boolean;
+  cad?: CadArtifact;
   script: string;
   stlBase64: string;
   metrics: {
@@ -21,8 +24,8 @@ export interface ExternalModelInput {
 }
 
 /**
- * Wraps a generic build123d/OCCT result as a VISION model. No geometry preset
- * is involved: the script and the OCCT-generated STL are the model source.
+ * Wraps a generic NVIDIA USD BRep result as a VISION model. No geometry preset
+ * is involved: the script and the kernel-generated STL are the model source.
  */
 export function createExternalModel(input: ExternalModelInput): {
   model: ModelDocument;
@@ -48,6 +51,8 @@ export function createExternalModel(input: ExternalModelInput): {
     },
   ];
   delete model.solidFeatures;
+  model.cad = input.cad;
+  model.studyBodyIds = input.cad?.bodies.filter((body) => body.kind === 'solid').map((body) => body.id);
   model.externalScript = input.script;
   model.externalStlBase64 = input.stlBase64;
   model.supports = [
@@ -77,7 +82,7 @@ export function createExternalModel(input: ExternalModelInput): {
   const { min, max, size } = input.metrics.bbox_mm;
   const metrics: GeometryMetrics = {
     volumeCm3: input.metrics.volume_mm3 / 1000,
-    massKg: input.metrics.mass_kg ?? 0,
+    massKg: massFromVolume(input.metrics.volume_mm3, getMaterial(model.materialId).rho),
     surfaceCm2: input.metrics.area_mm2 / 100,
     bbox: { min, max },
     triangleCount: 0,

@@ -1,3 +1,4 @@
+import type { CadArtifact, RegionSelection } from './cad/types';
 export type Vec3 = [number, number, number];
 export type Axis = 'x' | 'y' | 'z';
 export type FaceId = 'x-min' | 'x-max' | 'y-min' | 'y-max' | 'z-min' | 'z-max';
@@ -61,6 +62,7 @@ export interface FeatureDescriptor {
 }
 
 export interface Support {
+  region?: RegionSelection;
   id: string;
   name: string;
   face: FaceId;
@@ -69,6 +71,7 @@ export interface Support {
 }
 
 export interface Load {
+  region?: RegionSelection;
   id: string;
   name: string;
   face: FaceId;
@@ -100,6 +103,8 @@ export interface ModelDocument {
   variables: DesignVariable[];
   features: FeatureDescriptor[];
   solidFeatures?: SolidFeature[];
+  cad?: CadArtifact;
+  studyBodyIds?: string[];
   externalScript?: string;
   externalStlBase64?: string;
   externalMetrics?: GeometryMetrics;
@@ -128,11 +133,11 @@ export interface Box3 {
 }
 
 export interface QualityReport {
-  minScaledJacobian: number;
-  maxAspectRatio: number;
-  meanAspectRatio: number;
-  negativeElements: number;
-  activeNodeRatio: number;
+  minScaledJacobian: number | null;
+  maxAspectRatio: number | null;
+  meanAspectRatio: number | null;
+  negativeElements: number | null;
+  activeNodeRatio: number | null;
 }
 
 export interface GeometryData {
@@ -171,29 +176,30 @@ export interface MeshStats {
   elements: number;
   dofs: number;
   cellSize: number;
-  grid: [number, number, number];
-  activeNodeRatio: number;
+  grid: [number, number, number] | null;
+  activeNodeRatio: number | null;
   volumeMm3: number;
   quality: QualityReport;
 }
 
 export interface SolverStats {
-  method: 'SfePy';
-  preconditioner: 'Direct';
-  iterations: number;
-  residual: number;
-  relativeResidual: number;
-  converged: boolean;
-  solveMs: number;
-  meshMs: number;
-  strainEnergyMj: number;
+  method: 'SfePy' | 'scikit-fem';
+  algorithm?: 'Direct' | 'CG';
+  preconditioner: 'Direct' | 'Jacobi';
+  iterations: number | null;
+  residual: number | null;
+  relativeResidual: number | null;
+  converged: boolean | null;
+  solveMs: number | null;
+  meshMs: number | null;
+  strainEnergyMj: number | null;
 }
 
 export interface EquilibriumCheck {
   applied: Vec3;
-  reaction: Vec3;
-  residual: Vec3;
-  relativeError: number;
+  reaction: Vec3 | null;
+  residual: Vec3 | null;
+  relativeError: number | null;
 }
 
 export interface AnalysisResult {
@@ -201,6 +207,9 @@ export interface AnalysisResult {
   createdAt: string;
   modelRevision: string;
   modelHash: string;
+  inputFingerprint: string;
+  surfaceGeometry?: GeometryData;
+  boundaryEvidence?: Array<{ kind: string; name: string; nodes: number; facets?: number; areaMm2?: number; force?: number[] }>;
   studyName: string;
   materialId: string;
   loadCase: string;
@@ -277,6 +286,8 @@ export interface AgentAction {
     | 'explain_risk'
     | 'export_report'
     | 'run_usd_brep'
+    | 'query_usd_brep'
+    | 'configure_study'
     | 'unknown';
   args: Record<string, string | number | boolean>;
   label: string;

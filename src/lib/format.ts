@@ -1,7 +1,7 @@
 import type { FaceId, Vec3 } from '../core/types';
 
-export function fmt(value: number, digits = 2): string {
-  if (!Number.isFinite(value)) return '—';
+export function fmt(value: number | null | undefined, digits = 2): string {
+  if (value == null || !Number.isFinite(value)) return '—';
   return value.toLocaleString('en-US', {
     minimumFractionDigits: digits,
     maximumFractionDigits: digits,
@@ -9,7 +9,7 @@ export function fmt(value: number, digits = 2): string {
 }
 
 export function fmtCompact(value: number, digits = 1): string {
-  if (!Number.isFinite(value)) return '—';
+  if (value == null || !Number.isFinite(value)) return '—';
   const abs = Math.abs(value);
   if (abs >= 1_000_000) return `${fmt(value / 1_000_000, digits)}M`;
   if (abs >= 10_000) return `${fmt(value / 1000, digits)}k`;

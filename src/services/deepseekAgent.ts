@@ -11,6 +11,7 @@ import { isLlmConfigured, useLlmStore } from '../state/llmStore';
 import { useAppStore } from '../state/store';
 import { executeTool, labelForAction, type LastResultRef } from './agentTools';
 import { wait } from './simulation';
+import { EngineeringBackendError } from './engineeringBackend';
 
 export class AgentAbortedError extends Error {
   constructor() {
@@ -67,7 +68,7 @@ function asNumber(value: unknown, name: string): number {
   return number;
 }
 
-function toolAction(call: DeepSeekToolCall): AgentAction {
+export function toolAction(call: DeepSeekToolCall): AgentAction {
   const name = call.function.name;
   const args = parseArguments(call.function.arguments);
   const model = useAppStore.getState().model;
@@ -132,6 +133,8 @@ function toolAction(call: DeepSeekToolCall): AgentAction {
       label: '',
     };
   }
+  if (name === 'query_usd_brep') return { tool: 'query_usd_brep', args: { query: String(args.query ?? ''), offset: asNumber(args.offset ?? 0, 'offset') }, label: '' };
+  if (name === 'configure_study') return { tool: 'configure_study', args: { study_json: String(args.study_json ?? '{}') }, label: '' };
   if (name === 'run_usd_brep') {
     const script = String(args.script ?? '');
     if (!script.trim()) throw new Error('USD BRep 脚本为空');
@@ -139,11 +142,12 @@ function toolAction(call: DeepSeekToolCall): AgentAction {
       tool: 'run_usd_brep',
       args: {
         script,
+        options_json: String(args.options_json ?? '{}'),
+        use_current: args.use_current !== false,
         name: String(args.name ?? 'AI B-Rep 模型'),
         code: String(args.code ?? ''),
         new_project: args.new_project === true,
-        density_kg_m3: asNumber(args.density_kg_m3 ?? 2700, 'density_kg_m3'),
-        materialId: String(args.materialId ?? 'AL6061-T6'),
+        materialId: String(args.materialId ?? (args.new_project === true ? 'AL6061-T6' : model.materialId)),
       },
       label: '',
     };
@@ -208,6 +212,8 @@ export async function runDeepSeekTurn(
   } else {
     deepseekHistory[0] = systemMessage;
   }
+  let turnProjectId = store.activeProjectId;
+  const ensureCurrentProject = () => { if (signal.aborted || useAppStore.getState().activeProjectId !== turnProjectId) throw new AgentAbortedError(); };
   const messages: DeepSeekMessage[] = [...deepseekHistory, { role: 'user', content: prompt }];
 
   const messageId = uid('assistant');
@@ -259,7 +265,8 @@ export async function runDeepSeekTurn(
   };
 
   try {
-    for (let round = 0; round < 6; round += 1) {
+    for (let round = 0; round < 16; round += 1) {
+      ensureCurrentProject();
       let roundContent = '';
       let roundReasoning = '';
       pendingContent = content;
@@ -283,6 +290,7 @@ export async function runDeepSeekTurn(
           },
         },
       });
+      ensureCurrentProject();
       totalLatency += completion.latencyMs;
       aggregateUsage = {
         promptTokens: aggregateUsage.promptTokens + completion.usage.promptTokens,
@@ -346,7 +354,10 @@ export async function runDeepSeekTurn(
             streaming: true,
             meta: { kind: 'action', source: 'deepseek', model: modelLabel() },
           });
-          const result = await executeTool(action, lastResultRef);
+          ensureCurrentProject();
+          const result = await executeTool(action, lastResultRef, signal);
+          if (action.tool === 'run_usd_brep' && action.args.new_project === true) turnProjectId = useAppStore.getState().activeProjectId;
+          ensureCurrentProject();
           setStep(stepId, { status: 'done', detail: result.detail });
           messages.push({
             role: 'tool',
@@ -360,6 +371,7 @@ export async function runDeepSeekTurn(
             }),
           });
         } catch (error) {
+          if (error instanceof AgentAbortedError || signal.aborted) throw new AgentAbortedError();
           const message = error instanceof Error ? error.message : String(error);
           if (!steps.some((item) => item.id === stepId)) {
             step = { ...step, status: 'error', detail: message };
@@ -374,6 +386,7 @@ export async function runDeepSeekTurn(
             streaming: true,
             meta: { kind: 'action', source: 'deepseek', model: modelLabel() },
           });
+          if (error instanceof EngineeringBackendError && [0, 502, 503, 504].includes(error.status)) throw error;
           messages.push({
             role: 'tool',
             tool_call_id: call.id,
@@ -392,6 +405,7 @@ export async function runDeepSeekTurn(
       pendingReasoning = '';
     }
 
+    ensureCurrentProject();
     if (!finalContent) {
       finalContent = content || steps.map((step) => step.detail).filter(Boolean).join('\n') || '工具调用已完成。';
     }
@@ -405,8 +419,8 @@ export async function runDeepSeekTurn(
     deepseekHistory = trimHistory(messages);
     const result = useAppStore.getState().analysis;
     const chips = result
-      ? ['哪里最危险？', '以 SF ≥ 2.5 优化悬臂厚度', '生成工程校核报告']
-      : ['运行基线校核', '把悬臂厚度改为 14 mm', '切换为 7075-T6'];
+      ? ['解释分析限制', '生成工程校核报告']
+      : ['运行基线校核', '切换为 7075-T6'];
     useAppStore.getState().updateMessage(messageId, {
       content: finalContent,
       reasoning,
@@ -425,7 +439,7 @@ export async function runDeepSeekTurn(
     useLlmStore.getState().markConnected(Math.round(totalLatency));
   } catch (error) {
     if (flushTimer !== null) window.clearTimeout(flushTimer);
-    if (signal.aborted || (error instanceof DOMException && error.name === 'AbortError')) {
+    if (error instanceof AgentAbortedError || signal.aborted || (error instanceof DOMException && error.name === 'AbortError')) {
       useAppStore.getState().updateMessage(messageId, {
         content: content ? `${content}\n\n_已停止生成。_` : '_已停止生成。_',
         reasoning,
@@ -436,6 +450,14 @@ export async function runDeepSeekTurn(
         meta: { kind: 'question', source: 'deepseek', model: modelLabel() },
       });
       throw new AgentAbortedError();
+    }
+    if (error instanceof EngineeringBackendError) {
+      useAppStore.getState().updateMessage(messageId, {
+        content: `**工程后端调用失败：** ${error.message}\n\n请检查计算服务，恢复后再重试建模。`,
+        reasoning, steps: [...steps], streaming: false,
+        meta: { kind: 'question', source: 'deepseek', model: modelLabel() },
+      });
+      throw error;
     }
     const { message, retryable } = describeApiError(error);
     const fallbackNote = retryable ? '可检查网络/API 余额后重试。' : '请检查 API Key 与模型设置。';

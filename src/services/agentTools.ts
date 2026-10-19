@@ -4,7 +4,8 @@ import { useAppStore } from '../state/store';
 import { runStudy, wait } from './simulation';
 import { fmt, vectorLabel } from '../lib/format';
 import { directionVector } from '../core/llm/tools';
-import { executeNvidiaBrep } from './engineeringBackend';
+import { EngineeringBackendError, executeNvidiaBrep, queryCadApi, cadArtifactFromResult } from './engineeringBackend';
+import { applyStudyConfiguration } from '../core/cad/study';
 
 const FACES: FaceId[] = ['x-min', 'x-max', 'y-min', 'y-max', 'z-min', 'z-max'];
 
@@ -40,6 +41,8 @@ export function labelForAction(action: AgentAction): string {
       return '解析危险截面与失效裕度';
     case 'export_report':
       return '生成工程校核报告';
+    case 'query_usd_brep': return '查询内核 API';
+    case 'configure_study': return '配置分析工况';
     case 'run_usd_brep':
       return '执行 NVIDIA USD BRep 建模脚本';
     default:
@@ -71,6 +74,8 @@ export function compactState(): Record<string, unknown> {
           }
         : null,
       support: state.model.supports[0]?.face ?? null,
+      supports: state.model.supports, loads: state.model.loads,
+      nativeArtifact: state.model.cad?.artifactId ?? null, selectedBodies: state.model.studyBodyIds,
     },
     geometry: state.geometry
       ? {
@@ -111,6 +116,10 @@ export function riskNarrative(): string {
   const result = state.analysis;
   const geometry = state.geometry;
   if (!result || !geometry) return '尚未获得可用的求解结果。';
+  if (state.resultStale) return '结果已过期，请先重新求解。';
+  if (state.model.template === 'external') {
+    return `当前节点平均应力热点坐标 (${result.maxVonMisesLocation.map((value) => fmt(value, 2)).join(', ')}) mm；峰值 ${fmt(result.maxVonMises, 2)} MPa，位移 ${fmt(result.maxDisplacement, 4)} mm，SF ${fmt(result.safetyFactor, 2)}。尚无语义面映射，不能据坐标认定具体失效部位。\n\n${result.warnings.join('；')}`;
+  }
   const [x, y, z] = result.maxVonMisesLocation;
   const model = state.model;
   const wallThickness = model.variables.find((variable) => variable.key === 'wallThickness')?.value ?? 10;
@@ -197,7 +206,7 @@ function actionResultSummary(action: AgentAction): string {
     return `**校核结果**\n最大应力 **${fmt(result.maxVonMises, 1)} MPa**，最大位移 **${fmt(
       result.maxDisplacement,
       3,
-    )} mm**，安全系数 **${fmt(result.safetyFactor, 2)}**，质量 **${fmt(result.massKg, 3)} kg**。求解器：NVIDIA USD BRep + TetGen + SfePy。`;
+    )} mm**，安全系数 **${fmt(result.safetyFactor, 2)}**，质量 **${fmt(result.massKg, 3)} kg**。求解器：NVIDIA USD BRep + TetGen + ${result.solver.method}。`;
   }
   if (action.tool === 'set_variable') {
     return `已更新 **${action.args.label}** 至 **${action.args.value} ${action.args.unit ?? 'mm'}**，几何已重建${
@@ -216,7 +225,7 @@ function actionResultSummary(action: AgentAction): string {
     return `端部载荷更新为 **${action.args.magnitude} N**，方向 ${vectorLabel(vector)}，加载面 ${action.args.face}。`;
   }
   if (action.tool === 'set_support') {
-    return `约束切换到 **${action.args.name ?? action.args.face}**（${action.args.face}，6 DOF fixed）。`;
+    return `约束切换到 **${action.args.name ?? action.args.face}**（${action.args.face}，3 translational DOF fixed）。`;
   }
   if (action.tool === 'explain_risk') {
     return riskNarrative();
@@ -224,23 +233,44 @@ function actionResultSummary(action: AgentAction): string {
   return '';
 }
 
-export async function executeTool(action: AgentAction, lastResultRef: LastResultRef): Promise<ToolExecution> {
+export async function executeTool(action: AgentAction, lastResultRef: LastResultRef, signal?: AbortSignal): Promise<ToolExecution> {
+  if (signal?.aborted) throw new DOMException('已取消操作', 'AbortError');
   const store = useAppStore.getState();
   let detail = '';
   let summary = '';
+  if (action.tool === 'query_usd_brep') {
+    const api = await queryCadApi(String(action.args.query ?? ''), Number(action.args.offset ?? 0));
+    return { ok: true, summary: '', detail: `USD BRep ${api.version} · ${api.entries.length}/${api.total} API entries`, state: { api } };
+  }
+  if (action.tool === 'configure_study') {
+    applyStudyConfiguration(JSON.parse(String(action.args.study_json ?? '{}')));
+    return { ok: true, summary: '已更新分析工况。', detail: 'study configured', state: compactState() };
+  }
   if (action.tool === 'run_usd_brep') {
     const script = String(action.args.script ?? '');
     if (!script.trim()) throw new Error('USD BRep 脚本为空。');
-    const density = Number(action.args.density_kg_m3 ?? 2700);
-    const result = await executeNvidiaBrep(script, density);
+    const materialId = String(action.args.materialId ?? store.model.materialId);
+    const material = MATERIALS.find((item) => item.id === materialId);
+    if (!material) throw new Error(`未知材料：${materialId}`);
+    const projectId = store.activeProjectId;
+    const sourceModel = store.model;
+    const density = material.rho;
+    const options = JSON.parse(String(action.args.options_json ?? '{}'));
+    const sourceArtifact = action.args.use_current !== false ? store.model.cad?.artifactId : undefined;
+    const result = await executeNvidiaBrep(script, density, signal, options, sourceArtifact);
+    if (signal?.aborted) throw new DOMException('已取消建模', 'AbortError');
+    if (useAppStore.getState().activeProjectId !== projectId || useAppStore.getState().model !== sourceModel) {
+      throw new Error('建模期间工程已变更，本次结果未写入；请基于当前工程重试。');
+    }
     store.adoptExternalModel({
       name: String(action.args.name ?? 'AI B-Rep 模型'),
       code: String(action.args.code ?? `CAD-${String(Date.now()).slice(-4)}`),
       newProject: action.args.new_project === true,
       script,
       stlBase64: result.stlBase64,
+      cad: cadArtifactFromResult(result, sourceArtifact),
       metrics: result.metrics,
-      materialId: String(action.args.materialId ?? 'AL6061-T6'),
+      materialId,
     });
     await wait(40);
     detail = `${result.metrics.volume_mm3.toFixed(0)} mm³ · ${result.stlBytes} STL bytes`;
@@ -278,7 +308,10 @@ export async function executeTool(action: AgentAction, lastResultRef: LastResult
       ? (raw.split(',').map(Number) as Vec3)
       : directionVector(raw);
     const face = assertFace(action.args.face);
-    store.setLoadMagnitude(Number(action.args.magnitude));
+    const magnitude = Number(action.args.magnitude);
+    if (!Number.isFinite(magnitude) || magnitude <= 0) throw new Error('载荷必须为正的有限数值');
+    if (vector.length !== 3 || !vector.every(Number.isFinite) || Math.hypot(...vector) === 0) throw new Error('无效的载荷方向');
+    store.setLoadMagnitude(magnitude);
     store.setLoadFace(face);
     store.setLoadDirection(vector);    detail = `${action.args.magnitude} N · ${face}`;
     summary = actionResultSummary(action);
@@ -292,28 +325,31 @@ export async function executeTool(action: AgentAction, lastResultRef: LastResult
   } else if (action.tool === 'run_analysis') {
     const existing = useAppStore.getState().analysis;
     const stale = useAppStore.getState().resultStale;
-    let result = existing && !stale ? existing : null;
+    let result = existing && !stale && (!action.args.refinement || existing.convergence) ? existing : null;
     if (!result) {
       result = await runStudy({
         focusResult: false,
         silentToast: true,
         refinement: Boolean(action.args.refinement),
+        signal,
       });
     } else {
       await wait(180);
     }
     if (result) {
       lastResultRef.value = result;
-      detail = `${result.mesh.elements.toLocaleString('en-US')} EL · ${result.solver.iterations} iter`;
+      detail = `${result.mesh.elements.toLocaleString('en-US')} EL · ${result.solver.method} ${result.solver.algorithm ?? 'Direct'}`;
       summary = actionResultSummary(action);
       useAppStore.getState().setViewMode('result');
     } else {
-      throw new Error(useAppStore.getState().analysisError ?? '求解未返回结果');
+      const failure = useAppStore.getState();
+      if (failure.analysisErrorStatus != null) throw new EngineeringBackendError(failure.analysisError ?? '求解未返回结果', failure.analysisErrorStatus);
+      throw new Error(failure.analysisError ?? '求解未返回结果');
     }
   } else if (action.tool === 'explain_risk') {
     let result = useAppStore.getState().analysis;
     if (!result || useAppStore.getState().resultStale) {
-      result = await runStudy({ focusResult: false, silentToast: true });
+      result = await runStudy({ focusResult: false, silentToast: true, signal });
     }
     if (!result) throw new Error('尚无结果可供诊断');
     lastResultRef.value = result;
@@ -322,14 +358,14 @@ export async function executeTool(action: AgentAction, lastResultRef: LastResult
   } else if (action.tool === 'export_report') {
     let result = useAppStore.getState().analysis;
     if (!result || useAppStore.getState().resultStale) {
-      result = await runStudy({ focusResult: false, silentToast: true });
+      result = await runStudy({ focusResult: false, silentToast: true, signal });
     }
     if (!result) throw new Error('生成报告需要有效的求解结果');
     const { exportReportFile } = await import('../core/report/report');
     const state = useAppStore.getState();
     exportReportFile(state.model, result, state.validation);
     detail = `VISION_${state.model.code}_${result.id}.md`;
-    summary = `工程校核报告已生成并下载：**VISION_${state.model.code}_${result.id}.md**。报告包含材料与参数表、TetGen/SfePy 结果、限制与可追溯指纹。`;
+    summary = `工程校核报告已生成并下载：**VISION_${state.model.code}_${result.id}.md**。报告包含材料与参数表、有限元结果、限制与可追溯指纹。`;
   } else {
     throw new Error(`未识别的工具：${action.tool}`);
   }

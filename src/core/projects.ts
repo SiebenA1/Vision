@@ -1,3 +1,4 @@
+import { isCadArtifact } from './cad/schema';
 import type { ModelDocument, ProjectRecord } from './types';
 
 const STORAGE_KEY = 'vision.project.library.v2';
@@ -19,6 +20,7 @@ export function isModelDocument(value: unknown): value is ModelDocument {
   const model = value as Partial<ModelDocument>;
   return (
     model.schema === 'vision.model/1' &&
+    (model.cad === undefined || isCadArtifact(model.cad)) &&
     typeof model.id === 'string' &&
     typeof model.code === 'string' &&
     typeof model.name === 'string' &&
@@ -139,10 +141,17 @@ export function loadProjectLibrary(): ProjectLibraryState {
 export function persistProjectLibrary(projects: ProjectRecord[], activeProjectId: string): void {
   if (typeof window === 'undefined') return;
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(projects));
+    const metadata = projects.map((project) => {
+      if (!project.model.cad) return project;
+      const model = { ...project.model };
+      // The immutable backend artifact owns the large preview and native geometry.
+      delete model.externalStlBase64;
+      return { ...project, model };
+    });
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(metadata));
     localStorage.setItem(ACTIVE_KEY, activeProjectId);
   } catch {
-    // Local persistence is best-effort; STL payloads can be large.
+    window.dispatchEvent(new CustomEvent('vision:persistence-error'));
   }
 }
 

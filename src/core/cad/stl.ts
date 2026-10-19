@@ -6,14 +6,14 @@ function readFloat32(view: DataView, offset: number): number {
 
 /**
  * Parses a binary STL into the triangle mesh consumed by the viewport and the
- * voxel FE mesher. Build123d exports binary STL by default.
+ * STL transport. The CAD worker exports binary STL.
  */
 export function parseBinaryStl(bytes: Uint8Array, watermark: string): GeometryData {
   if (bytes.byteLength < 84) throw new Error('STL 文件过短。');
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const triangleCount = view.getUint32(80, true);
   const expected = 84 + triangleCount * 50;
-  if (triangleCount <= 0 || expected > bytes.byteLength) {
+  if (triangleCount <= 0 || expected !== bytes.byteLength) {
     throw new Error('不是有效的二进制 STL。');
   }
   const positions = new Float32Array(triangleCount * 9);
@@ -28,6 +28,7 @@ export function parseBinaryStl(bytes: Uint8Array, watermark: string): GeometryDa
     for (let vertex = 0; vertex < 3; vertex += 1) {
       for (let axis = 0; axis < 3; axis += 1) {
         const value = readFloat32(view, offset + vertex * 12 + axis * 4);
+        if (!Number.isFinite(value)) throw new Error('STL 包含非有限坐标。');
         positions[base + vertex * 3 + axis] = value;
         min[axis] = Math.min(min[axis], value);
         max[axis] = Math.max(max[axis], value);

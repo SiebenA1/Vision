@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { geometryFingerprint, studyFingerprint } from '../core/provenance';
 import type {
   AnalysisResult,
   ChatMessage,
@@ -26,7 +27,7 @@ import { getMaterial, massFromVolume, type MaterialSpec } from '../core/material
 
 export interface SolveProgress {
   phase: 'mesh' | 'solve' | 'refine';
-  percent: number;
+  percent: number | null;
   detail: string;
 }
 
@@ -51,6 +52,7 @@ interface AppState {
   analysis: AnalysisResult | null;
   analysisStatus: AnalysisStatus;
   analysisError: string | null;
+  analysisErrorStatus: number | null;
   solveProgress: SolveProgress | null;
   resultStale: boolean;
   validation: ValidationResult | null;
@@ -100,6 +102,7 @@ interface AppState {
   setLoadDirection: (vector: [number, number, number], record?: boolean) => void;
   setSupportFace: (face: ModelDocument['supports'][number]['face'], record?: boolean) => void;
 
+  configureStudy: (patch: Pick<ModelDocument, 'supports' | 'loads' | 'mesh' | 'studyBodyIds'>) => void;
   setAnalysis: (analysis: AnalysisResult | null) => void;
   setAnalysisStatus: (status: AnalysisStatus) => void;
   setAnalysisError: (message: string | null) => void;
@@ -141,9 +144,9 @@ function uid(prefix: string): string {
 function metricsFor(model: ModelDocument, geometry: GeometryData): GeometryMetrics {
   const material = getMaterial(model.materialId);
   return {
-    volumeCm3: geometry.volumeMm3 / 1000,
-    massKg: massFromVolume(geometry.volumeMm3, material.rho),
-    surfaceCm2: geometry.areaMm2 / 100,
+    volumeCm3: model.externalMetrics?.volumeCm3 ?? geometry.volumeMm3 / 1000,
+    massKg: massFromVolume((model.externalMetrics?.volumeCm3 ?? geometry.volumeMm3 / 1000) * 1000, material.rho),
+    surfaceCm2: model.externalMetrics?.surfaceCm2 ?? geometry.areaMm2 / 100,
     bbox: geometry.bbox,
     triangleCount: geometry.triangleCount,
     buildMs: geometry.buildMs,
@@ -161,9 +164,9 @@ function chatSeedFor(model: ModelDocument): ChatMessage[] {
   const external = model.template === 'external';
   const content =
     model.template === 'empty'
-      ? `${model.code} · ${model.name} 空白工程已创建。当前没有几何体。\n\n直接在 ATLAS 中用 NVIDIA USD BRep 描述零件；模型会由 NURBS B-Rep 内核执行并生成精确几何。没有预置模型。`
+      ? `你好，我是 ATLAS。描述零件、尺寸和设计要求，开始建模。`
       : external
-        ? `${model.code} · ${model.name} 已通过 NVIDIA USD BRep 生成。几何来自本次脚本，不是预设模型。\n\n可运行基线校核，或继续描述要修改的几何。`
+        ? `${model.name} 已载入。可以继续修改模型，或设置工况并运行分析。`
         : `${model.code} · ${model.name} 已载入。`;
   return [
     {
@@ -184,6 +187,7 @@ function freshAnalysisState() {
     analysis: null,
     analysisStatus: 'idle' as const,
     analysisError: null,
+    analysisErrorStatus: null,
     solveProgress: null,
     resultStale: false,
     validation: null,
@@ -216,6 +220,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
   analysis: null,
   analysisStatus: 'idle',
   analysisError: null,
+  analysisErrorStatus: null,
   solveProgress: null,
   resultStale: false,
   validation: null,
@@ -225,14 +230,14 @@ export const useAppStore = create<AppState>()((set, get) => ({
   rail: 'model',
   selectedFeatureId: 'arm',
   selectedVariableKey: 'armThickness',
-  leftCollapsed: false,
+  leftCollapsed: true,
   copilotCollapsed: false,
 
   viewMode: 'design',
   field: 'vonMises',
   deformationScale: 10,
   showEdges: true,
-  showAnnotations: true,
+  showAnnotations: false,
 
   chat: chatSeedFor(initialModel),
   chatBusy: false,
@@ -259,20 +264,23 @@ export const useAppStore = create<AppState>()((set, get) => ({
     const model = get().model;
     const seq = get().buildSeq + 1;
     if (model.template === 'external') {
-      if (!model.externalStlBase64) {
-        set({
-          buildSeq: seq,
-          building: false,
-          geometryError: '外部 B-Rep 模型缺少 STL 数据，请重新执行 USD BRep 脚本。',
-        });
-        return null;
-      }
       try {
-        const geometry = parseBinaryStl(base64ToUint8(model.externalStlBase64), `EXT-${model.code}`);
+        set({ buildSeq: seq, building: true, geometryError: null });
+        let bytes: Uint8Array;
+        if (model.cad && !model.externalStlBase64) {
+          const response = await fetch(`/api/engineering/cad/artifacts/${model.cad.artifactId}/preview.stl`);
+          if (!response.ok) throw new Error('原生制品不可用，请导入工程包或重新执行建模脚本。');
+          bytes = new Uint8Array(await response.arrayBuffer());
+          if (get().model !== model) return null;
+        } else {
+          if (!model.externalStlBase64) throw new Error('外部模型缺少 STL 数据，请重新建模。');
+          bytes = base64ToUint8(model.externalStlBase64);
+        }
+        const geometry = parseBinaryStl(bytes, geometryFingerprint(model));
         const stored = model.externalMetrics;
         const metrics: GeometryMetrics = {
           volumeCm3: stored?.volumeCm3 ?? geometry.volumeMm3 / 1000,
-          massKg: stored?.massKg ?? massFromVolume(geometry.volumeMm3, getMaterial(model.materialId).rho),
+          massKg: massFromVolume((stored?.volumeCm3 ?? geometry.volumeMm3 / 1000) * 1000, getMaterial(model.materialId).rho),
           surfaceCm2: stored?.surfaceCm2 ?? geometry.areaMm2 / 100,
           bbox: geometry.bbox,
           triangleCount: geometry.triangleCount,
@@ -285,10 +293,11 @@ export const useAppStore = create<AppState>()((set, get) => ({
           geometryMetrics: metrics,
           geometryError: null,
           building: false,
-          resultStale: Boolean(get().analysis),
+          resultStale: Boolean(get().analysis && get().analysis?.inputFingerprint !== studyFingerprint(model)),
         });
         return geometry;
       } catch (error) {
+        if (get().model !== model) return null;
         set({
           buildSeq: seq,
           building: false,
@@ -406,10 +415,11 @@ export const useAppStore = create<AppState>()((set, get) => ({
     const createNew = input.newProject === true || !currentRecord;
     const { model, metrics } = createExternalModel({
       ...input,
-      code: createNew ? input.code : currentRecord.model.code,
-      name: createNew ? input.name : currentRecord.model.name,
+      code: createNew ? input.code : state.model.code,
+      name: createNew ? input.name : state.model.name,
+      materialId: input.materialId ?? (createNew ? undefined : state.model.materialId),
     });
-    const geometry = parseBinaryStl(base64ToUint8(input.stlBase64), `EXT-${model.code}`);
+    const geometry = parseBinaryStl(base64ToUint8(input.stlBase64), geometryFingerprint(model));
     const geometryMetrics: GeometryMetrics = {
       ...metrics,
       bbox: geometry.bbox,
@@ -425,7 +435,12 @@ export const useAppStore = create<AppState>()((set, get) => ({
       projects = [...state.projects, record];
       activeProjectId = record.id;
     } else {
-      model.id = currentRecord.model.id;
+      model.id = state.model.id;
+      model.revision = state.model.revision;
+      model.supports = cloneModel(state.model.supports);
+      model.loads = cloneModel(state.model.loads);
+      model.mesh = cloneModel(state.model.mesh);
+      model.meta = { ...state.model.meta, designIntent: model.meta.designIntent };
       const updatedRecord = {
         ...currentRecord,
         model: structuredClone(model),
@@ -447,6 +462,9 @@ export const useAppStore = create<AppState>()((set, get) => ({
     };
     set({
       ...freshAnalysisState(),
+      history: createNew ? [] : [...state.history, { model: cloneModel(state.model), label: 'USD BRep 几何修改' }],
+      chatBusy: state.chatBusy,
+      agentSource: state.agentSource,
       model,
       projects,
       activeProjectId,
@@ -568,6 +586,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
     const state = get();
     const variable = state.model.variables.find((item) => item.key === key);
     if (!variable) return;
+    if (!Number.isFinite(value)) throw new Error('设计变量必须是有限数值');
     const clamped = Math.min(variable.max, Math.max(variable.min, value));
     if (Math.abs(clamped - variable.value) < 1e-9) return;
     if (record) {
@@ -610,7 +629,9 @@ export const useAppStore = create<AppState>()((set, get) => ({
   },
 
   setLoadMagnitude: (magnitude, record = true) => {
+    if (!Number.isFinite(magnitude) || magnitude < 0) throw new Error('载荷必须是非负有限数值');
     const state = get();
+    if (!state.model.loads[0]) throw new Error('请先定义载荷');
     if (record) {
       state.history.push({ model: cloneModel(state.model), label: `载荷 → ${magnitude} N` });
     }
@@ -632,6 +653,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
     }
     const model = cloneModel(state.model);
     model.loads[0].face = face;
+    delete model.loads[0].region;
     set((current) => ({
       model,
       history: record ? [...state.history] : current.history,
@@ -642,7 +664,8 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
   setLoadDirection: (vector, record = true) => {
     const state = get();
-    const clean = vector.map((item) => (Math.abs(item) < 1e-9 ? 0 : Math.sign(item))) as [number, number, number];
+    if (vector.length !== 3 || !vector.every(Number.isFinite) || Math.hypot(...vector) === 0) throw new Error('载荷方向必须是非零有限三维向量');
+    const clean = [...vector] as [number, number, number];
     if (state.model.loads[0].vector.join(',') === clean.join(',')) return;
     if (record) {
       state.history.push({ model: cloneModel(state.model), label: '更新载荷方向' });
@@ -659,12 +682,13 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
   setSupportFace: (face, record = true) => {
     const state = get();
-    if (state.model.supports[0].face === face) return;
+    if (state.model.supports[0].face === face && !state.model.supports[0].region) return;
     if (record) {
       state.history.push({ model: cloneModel(state.model), label: '更新约束面' });
     }
     const model = cloneModel(state.model);
     model.supports[0].face = face;
+    delete model.supports[0].region;
     model.supports[0].name = face === 'x-min' ? '背板固定面' : `${face} 固定`;
     set((current) => ({
       model,
@@ -674,9 +698,14 @@ export const useAppStore = create<AppState>()((set, get) => ({
     }));
   },
 
+  configureStudy: (patch) => {
+    const state = get();
+    set({ model: { ...cloneModel(state.model), ...cloneModel(patch) }, history: [...state.history, { model: cloneModel(state.model), label: '更新分析工况' }], future: [] });
+  },
+
   setAnalysis: (analysis) => set({ analysis }),
   setAnalysisStatus: (analysisStatus) => set({ analysisStatus }),
-  setAnalysisError: (analysisError) => set({ analysisError }),
+  setAnalysisError: (analysisError) => set({ analysisError, analysisErrorStatus: null }),
   setSolveProgress: (solveProgress) => set({ solveProgress }),
   setValidation: (validation) => set({ validation }),
   setValidationStatus: (validationStatus) => set({ validationStatus }),
@@ -766,3 +795,10 @@ export const useAppStore = create<AppState>()((set, get) => ({
 export function currentMaterial(): MaterialSpec {
   return getMaterial(useAppStore.getState().model.materialId);
 }
+
+// Keep invalidation independent of React effects and every individual tool caller.
+useAppStore.subscribe((state, previous) => {
+  if (state.model === previous.model && state.analysis === previous.analysis) return;
+  const stale = Boolean(state.analysis && state.analysis.inputFingerprint !== studyFingerprint(state.model));
+  if (stale !== state.resultStale) useAppStore.setState({ resultStale: stale });
+});

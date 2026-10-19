@@ -24,38 +24,20 @@ export function directionVector(direction: string): [number, number, number] {
   }
 }
 
-export function buildDeepSeekTools(model: ModelDocument): DeepSeekTool[] {
-  const variableKeys = model.variables.map((variable) => variable.key);
-  const variableList = model.variables
-    .map((variable) => `${variable.key} (${variable.label}, ${variable.min}-${variable.max} ${variable.unit})`)
-    .join('; ');
-
+export function buildDeepSeekTools(_model: ModelDocument): DeepSeekTool[] {
   return ([
     {
-      type: 'function',
-      function: {
-        name: 'set_variable',
-        description: `修改一个参数化设计变量并重建 watertight 几何。可选变量：${variableList}。修改后 FE 结果会过期。`,
-        parameters: {
-          type: 'object',
-          properties: {
-            key: {
-              type: 'string',
-              enum: variableKeys,
-              description: 'Design variable key.',
-            },
-            value: {
-              type: 'number',
-              description: 'New value in mm. The app clamps to the variable bounds.',
-            },
-            reason: {
-              type: 'string',
-              description: 'One short engineering reason for the change.',
-            },
-          },
-          required: ['key', 'value'],
-          additionalProperties: false,
-        },
+      type: 'function', function: {
+        name: 'query_usd_brep', description: '查询已安装 USD BRep 的真实 API 签名与文档。使用不熟悉的扫掠、曲面、抽壳、圆角、修复或导入导出前先查询；不要猜测函数签名。',
+        parameters: { type: 'object', properties: { query: { type: 'string', description: 'Function name or group, e.g. pipe_sweep, create_skin, fillet, surfaces, usd' }, offset: { type: 'integer', minimum: 0 } }, required: ['query'], additionalProperties: false },
+      },
+    },
+    {
+      type: 'function', function: {
+        name: 'configure_study', description: '一次性配置多个固定约束、合力载荷、分析实体与网格尺寸。支持极值面、box/sphere 空间区域、原生 cad-face 选择。零件之间无隐式粘接/接触。修改后需单独运行分析。',
+        parameters: { type: 'object', properties: {
+          study_json: { type: 'string', description: 'JSON object with optional supports:[{id,name,face,type:"fixed",enabled,region?}], loads:[{id,name,face,vector:[x,y,z],magnitude,enabled,region?}], bodyIds:["body-0"], meshSize:number. region={type:"box",min:[x,y,z],max:[x,y,z]} or {type:"sphere",center:[x,y,z],radius:number}. or {type:"cad-face",artifactId:"current artifact",faceIds:["body-0/face-0"],toleranceMm:0.075}. Native face IDs must belong to the current artifact. Coordinates mm. Use enabled:true.' },
+        }, required: ['study_json'], additionalProperties: false },
       },
     },
     {
@@ -115,7 +97,7 @@ export function buildDeepSeekTools(model: ModelDocument): DeepSeekTool[] {
       type: 'function',
       function: {
         name: 'set_support',
-        description: '修改固定约束面；约束为该面的 6-DOF fixed。',
+        description: '修改固定约束面；约束为该面的 3 translational DOF fixed。',
         parameters: {
           type: 'object',
           properties: {
@@ -135,47 +117,15 @@ export function buildDeepSeekTools(model: ModelDocument): DeepSeekTool[] {
       function: {
         name: 'run_analysis',
         description:
-          '运行一次真实 C3D8 线弹性静力校核。如果模型未变且结果有效，会复用现有结果；结果过期或不存在时重新求解。',
+          '运行一次真实 TetGen C3D4 / scikit-fem 线弹性静力校核。如果模型未变且结果有效，会复用现有结果；结果过期或不存在时重新求解。',
         parameters: {
           type: 'object',
           properties: {
             refinement: {
               type: 'boolean',
-              description: 'If true, also run an h-refinement convergence check (slower).',
+              description: 'If true, run two solves with decreasing requested mesh size and compare displacement; this is not proof of mesh independence.',
             },
           },
-          additionalProperties: false,
-        },
-      },
-    },
-    {
-      type: 'function',
-      function: {
-        name: 'optimize',
-        description:
-          '打开生成式优化工作台并启动单变量 FE-in-the-loop 搜索。该操作异步运行，不要在结果完成前声称已得到优化解。',
-        parameters: {
-          type: 'object',
-          properties: {
-            variableKey: {
-              type: 'string',
-              enum: variableKeys,
-              description: 'Design variable to optimize.',
-            },
-            targetSafety: {
-              type: 'number',
-              minimum: 0.5,
-              maximum: 5,
-              description: 'Minimum safety factor.',
-            },
-            displacementLimit: {
-              type: 'number',
-              minimum: 0.05,
-              maximum: 20,
-              description: 'Maximum displacement in mm.',
-            },
-          },
-          required: ['variableKey', 'targetSafety', 'displacementLimit'],
           additionalProperties: false,
         },
       },
@@ -209,92 +159,14 @@ export function buildDeepSeekTools(model: ModelDocument): DeepSeekTool[] {
     {
       type: 'function',
       function: {
-        name: 'generate_preset',
-        description:
-          '生成一个完整的工程预设模型并作为新项目打开。brake-pedal 生成刹车踏板支架；wind-blade 生成 NACA 截面放样风电叶片。轮辋必须使用 create_wheel_rim 按用户参数实时生成，不要用固定预设。',
-        parameters: {
-          type: 'object',
-          properties: {
-            preset: {
-              type: 'string',
-              enum: ['brake-pedal', 'wind-blade'],
-              description: 'Engineering preset id.',
-            },
-            reason: {
-              type: 'string',
-              description: 'Short engineering reason.',
-            },
-          },
-          required: ['preset'],
-          additionalProperties: false,
-        },
-      },
-    },
-    {
-      type: 'function',
-      function: {
-        name: 'create_wheel_rim',
-        description:
-          '按用户明确参数实时生成汽车轮辋，不得用固定 5 辐预设代替。辐条数量、外径、宽度、PCD、中心孔、螺栓孔数量都进入参数化 CSG 生成器；生成后重建 watertight 几何。',
-        parameters: {
-          type: 'object',
-          properties: {
-            spokeCount: {
-              type: 'integer',
-              minimum: 3,
-              maximum: 20,
-              description: 'Number of equally spaced spokes requested by the user.',
-            },
-            outerDiameterMm: {
-              type: 'number',
-              minimum: 300,
-              maximum: 700,
-              description: 'Bead-seat outer diameter in mm. 18 inch = 457.2 mm.',
-            },
-            widthMm: {
-              type: 'number',
-              minimum: 100,
-              maximum: 350,
-              description: 'Rim width in mm.',
-            },
-            pcdMm: {
-              type: 'number',
-              minimum: 80,
-              maximum: 220,
-              description: 'Bolt circle diameter in mm.',
-            },
-            centerBoreMm: {
-              type: 'number',
-              minimum: 35,
-              maximum: 130,
-              description: 'Center bore diameter in mm.',
-            },
-            lugCount: {
-              type: 'integer',
-              minimum: 3,
-              maximum: 8,
-              description: 'Number of lug holes.',
-            },
-            materialId: {
-              type: 'string',
-              enum: MATERIALS.map((material) => material.id),
-              description: 'Material database id.',
-            },
-          },
-          required: ['spokeCount', 'outerDiameterMm', 'widthMm', 'pcdMm', 'centerBoreMm', 'lugCount'],
-          additionalProperties: false,
-        },
-      },
-    },
-    {
-      type: 'function',
-      function: {
         name: 'run_usd_brep',
         description:
-          '通用 CAD 建模入口：执行一段 NVIDIA USD BRep（NURBS B-Rep）Python 脚本。脚本必须 import usd_brep as u，并把一个 usd_brep.Brep 赋给名为 result 的顶层变量。单位 mm，Z 向上。默认更新当前工程；只有用户明确要求“新建工程”时才设置 new_project=true。',
+          '通用 CAD 建模入口：执行一段 NVIDIA USD BRep（NURBS B-Rep）Python 脚本。脚本必须 import usd_brep as u，并把 Brep、Brep 列表或 name->Brep 字典赋给 result（支持实体与片体）。单位 mm，Z 向上。默认更新当前工程；只有用户明确要求“新建工程”时才设置 new_project=true。',
         parameters: {
           type: 'object',
           properties: {
+            options_json: { type: 'string', description: 'Optional JSON: parameters:{key:number|string|boolean}, tolerance_mm (absolute chord tolerance, default .05), angle_deg, relative_accuracy, heal.' },
+            use_current: { type: 'boolean', description: 'Default true on an existing native model: import previous BReps as parts[name] before executing the script. Copy/reuse bodies according to the API ownership rules.' },
             script: {
               type: 'string',
               description:
@@ -305,10 +177,6 @@ export function buildDeepSeekTools(model: ModelDocument): DeepSeekTool[] {
             new_project: {
               type: 'boolean',
               description: 'Create a new project. Default false updates the active project in place.',
-            },
-            density_kg_m3: {
-              type: 'number',
-              description: 'Uniform density used only for mass reporting.',
             },
             materialId: {
               type: 'string',
@@ -321,50 +189,7 @@ export function buildDeepSeekTools(model: ModelDocument): DeepSeekTool[] {
         },
       },
     },
-    {
-      type: 'function',
-      function: {
-        name: 'add_solid_feature',
-        description:
-          '向当前 CSG 特征图追加一个实体或切除特征，并重建 watertight 几何。只能用于 CSG 模型；若不是 CSG 模型，先调用 generate_preset。坐标系为 mm，Z 向上。',
-        parameters: {
-          type: 'object',
-          properties: {
-            shape: {
-              type: 'string',
-              enum: ['box', 'cylinder', 'sphere'],
-              description: 'Primitive type.',
-            },
-            operation: {
-              type: 'string',
-              enum: ['add', 'subtract'],
-              description: 'Boolean union or difference.',
-            },
-            x: { type: 'number', description: 'Center X in mm.' },
-            y: { type: 'number', description: 'Center Y in mm.' },
-            z: { type: 'number', description: 'Center Z in mm.' },
-            sx: { type: 'number', description: 'Box size X in mm.' },
-            sy: { type: 'number', description: 'Box size Y in mm.' },
-            sz: { type: 'number', description: 'Box size Z in mm.' },
-            radius: { type: 'number', description: 'Cylinder/sphere radius in mm.' },
-            height: { type: 'number', description: 'Cylinder height in mm.' },
-            axis: { type: 'string', enum: ['x', 'y', 'z'], description: 'Cylinder axis.' },
-            rx: { type: 'number', description: 'Rotation about X in degrees.' },
-            ry: { type: 'number', description: 'Rotation about Y in degrees.' },
-            rz: { type: 'number', description: 'Rotation about Z in degrees.' },
-            reason: { type: 'string', description: 'Short engineering reason.' },
-          },
-          required: ['shape', 'operation'],
-          additionalProperties: false,
-        },
-      },
-    },
-  ] as DeepSeekTool[]).filter(
-    (tool) =>
-      !['generate_preset', 'create_wheel_rim', 'add_solid_feature', 'set_variable', 'optimize'].includes(
-        tool.function.name,
-      ),
-  );
+  ] as DeepSeekTool[]);
 }
 
 export function buildModelContext(
@@ -394,9 +219,8 @@ export function buildModelContext(
     },
     currentModel: {
       hasGeometry: Boolean(model.externalStlBase64),
-      script: script
-        ? `${script.slice(0, 24000)}${script.length > 24000 ? '\n# ... script truncated in context ...' : ''}`
-        : null,
+      script: script || null,
+      native: model.cad ? { artifactId: model.cad.artifactId, kernelVersion: model.cad.kernelVersion, parameters: model.cad.parameters, settings: model.cad.settings, bodies: model.cad.bodies.map((body) => ({ id: body.id, name: body.name, kind: body.kind, bbox: body.bbox_mm, faceCount: body.faces.length, edgeCount: body.edges.length })), selectedBodyIds: model.studyBodyIds } : null,
     },
     material: {
       id: material.id,
@@ -432,12 +256,14 @@ export function buildModelContext(
     supports: model.supports.map((support) => ({
       name: support.name,
       face: support.face,
+      region: support.region ?? null,
       type: support.type,
       enabled: support.enabled,
     })),
     loads: model.loads.map((load) => ({
       name: load.name,
       face: load.face,
+      region: load.region ?? null,
       vector: load.vector,
       magnitude_N: load.magnitude,
       enabled: load.enabled,
@@ -495,7 +321,7 @@ export function buildModelContext(
       'run_analysis',
       'explain_risk',
       'export_report',
-      'run_usd_brep',
+      'run_usd_brep', 'query_usd_brep', 'configure_study',
     ],
   };
 }

@@ -7,6 +7,7 @@ import { AgentAbortedError, runDeepSeekTurn } from './deepseekAgent';
 import { executeTool, labelForAction, type LastResultRef } from './agentTools';
 import { describeApiError } from '../core/llm/client';
 import { wait } from './simulation';
+import { EngineeringBackendError } from './engineeringBackend';
 
 let activeController: AbortController | null = null;
 
@@ -141,6 +142,10 @@ export async function sendAgentPrompt(prompt: string): Promise<void> {
             detail: 'DeepSeek 请求已取消，未执行后续工具。',
             tone: 'neutral',
           });
+          return;
+        }
+        if (error instanceof EngineeringBackendError) {
+          useAppStore.getState().addToast({ title: '工程后端调用失败', detail: error.message, tone: 'error' });
           return;
         }
         const described = describeApiError(error);

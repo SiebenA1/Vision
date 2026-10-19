@@ -1,14 +1,16 @@
 import type { AnalysisResult, ModelDocument, ValidationResult } from '../types';
 import { getMaterial } from '../materials';
+import { studyFingerprint } from '../provenance';
 
 export function buildReportMarkdown(
   model: ModelDocument,
   result: AnalysisResult,
   validation: ValidationResult | null,
 ): string {
+  if (result.inputFingerprint !== studyFingerprint(model)) throw new Error('报告输入与求解工况不一致，请重新求解。');
   const material = getMaterial(model.materialId);
   const pass = result.safetyFactor >= 2.0 && result.maxDisplacement <= 2.0;
-  const fmt = (value: number, digits = 3) => value.toFixed(digits);
+  const fmt = (value: number | null | undefined, digits = 3) => value == null || !Number.isFinite(value) ? '未计算' : value.toFixed(digits);
   const rows = model.variables
     .map((variable) => `| ${variable.label} | ${variable.labelEn} | ${variable.value} | ${variable.unit} | ${variable.group} |`)
     .join('\n');
@@ -36,9 +38,9 @@ export function buildReportMarkdown(
 | 安全系数 SF | ${fmt(result.safetyFactor, 2)} | ≥ 2.00 | ${result.safetyFactor >= 2.0 ? 'PASS' : 'REVIEW'} |
 | 最大位移 | ${fmt(result.maxDisplacement, 3)} mm | ≤ 2.000 mm | ${result.maxDisplacement <= 2.0 ? 'PASS' : 'REVIEW'} |
 | 结构质量 | ${fmt(result.massKg, 4)} kg | 设计目标 | — |
-| 反力平衡误差 | ${result.equilibrium.relativeError.toExponential(2)} | ≤ 1e-4 | ${result.equilibrium.relativeError <= 1e-4 ? 'PASS' : 'REVIEW'} |
+| 反力平衡误差 | ${result.equilibrium.relativeError?.toExponential(2) ?? '未验证'} | ≤ 1e-4 | ${result.equilibrium.relativeError == null ? 'UNVERIFIED' : result.equilibrium.relativeError <= 1e-4 ? 'PASS' : 'REVIEW'} |
 
-**总体判定：${pass ? '满足当前设计目标' : '需要设计迭代或工程复核'}**
+**总体判定：${pass ? '满足默认数值筛选目标；证据不完整，仍需工程复核' : '需要设计迭代或工程复核'}**
 
 > 本报告为线弹性、小变形、各向同性静力分析。结果用于概念与详细设计阶段的趋势判断，不替代材料认证、疲劳寿命、屈曲、冲击、连接件滑移/预紧或试验验证。
 
@@ -50,15 +52,19 @@ export function buildReportMarkdown(
 - 客户 / 专业：${model.meta.client} · ${model.meta.discipline}
 - 材料：${material.name}（${material.standard}）
 - 材料参数：E = ${material.E} MPa，ν = ${material.nu}，ρ = ${material.rho} kg/m³，σy = ${material.yieldStrength} MPa
-- 载荷工况：${result.loadCase}；加载面 ${model.loads[0]?.face ?? '—'}；方向 [${model.loads[0]?.vector.join(', ')}]；合力 ${model.loads[0]?.magnitude ?? 0} N
-- 约束：${model.supports.map((support) => `${support.name}（${support.face}，6 DOF fixed）`).join('；')}
+- 载荷工况：${model.loads.filter((item) => item.enabled).map((item) => `${item.name}；区域 ${JSON.stringify(item.region ?? item.face)}；方向 [${item.vector.join(', ')}]；合力 ${item.magnitude} N`).join('；')}
+- 约束：${model.supports.filter((item) => item.enabled).map((support) => `${support.name}（${JSON.stringify(support.region ?? support.face)}，3 translational DOF fixed）`).join('；')}
 
 ---
 
 ## 3. 几何与参数
 
-- 几何内核：build123d / OCCT B-Rep（脚本可重放）
-- 网格：${result.mesh.elements.toLocaleString('en-US')} 个 ${result.solver.method === 'SfePy' ? 'C3D4 四面体' : 'C3D8 六面体'}单元 / ${result.mesh.nodes.toLocaleString('en-US')} 节点
+- 几何内核：NVIDIA USD BRep / NURBS B-Rep
+- 原生制品：${model.cad?.artifactId ?? '旧版 STL 模型'}
+- 内核版本：${model.cad?.kernelVersion ?? '未记录'}
+- 分析实体：${model.studyBodyIds?.join(', ') ?? '全部'}
+- 边界选择证据：${JSON.stringify(result.boundaryEvidence ?? [])}
+- 网格：${result.mesh.elements.toLocaleString('en-US')} 个 C3D4 四面体单元 / ${result.mesh.nodes.toLocaleString('en-US')} 节点
 - 模型指纹：\`${result.modelHash}\`（参数 + 几何版本）
 - 网格指纹：\`${result.id}\`
 
@@ -70,13 +76,13 @@ ${rows}
 
 ## 4. 有限元模型
 
-- 单元类型：${result.solver.method === 'SfePy' ? '4 节点线性四面体（C3D4），SfePy P1' : '8 节点三线性六面体（C3D8 / Hex8），2×2×2 Gauss 全积分'}
-- 网格策略：${result.solver.method === 'SfePy' ? 'Gmsh 3D tetrahedral mesh from OCCT STEP' : '结构化体素网格'}
+- 单元类型：4 节点线性四面体（C3D4），P1
+- 网格策略：TetGen tetrahedral mesh from USD BRep STL
 - 网格尺寸：h = ${fmt(result.mesh.cellSize, 3)} mm
 - 自由度：${result.mesh.dofs.toLocaleString('en-US')} DOF
 - 材料本构：各向同性线弹性
-- 求解器：${result.solver.method === 'SfePy' ? 'Gmsh + SfePy 直接法' : '矩阵自由 PCG + Jacobi 预条件'}
-- 收敛：${result.solver.converged ? 'CONVERGED' : 'NOT CONVERGED'}
+- 求解器：${result.solver.method} / SciPy ${result.solver.algorithm ?? 'Direct'}；预处理 ${result.solver.preconditioner}；迭代次数 ${result.solver.iterations ?? '不适用'}
+- 收敛：${result.solver.converged == null ? 'UNVERIFIED（后端未返回收敛证据）' : result.solver.converged ? 'CONVERGED' : 'NOT CONVERGED'}
 - 墙钟时间：网格 ${fmt(result.solver.meshMs, 0)} ms；求解 ${fmt(result.solver.solveMs, 0)} ms
 - 应变能：${fmt(result.solver.strainEnergyMj, 2)} mJ
 
@@ -84,9 +90,9 @@ ${rows}
 
 | 分量 | 施加荷载 (N) | 支座反力 (N) | 残差 (N) |
 |---|---:|---:|---:|
-| Fx | ${fmt(result.equilibrium.applied[0], 3)} | ${fmt(result.equilibrium.reaction[0], 3)} | ${fmt(result.equilibrium.residual[0], 3)} |
-| Fy | ${fmt(result.equilibrium.applied[1], 3)} | ${fmt(result.equilibrium.reaction[1], 3)} | ${fmt(result.equilibrium.residual[1], 3)} |
-| Fz | ${fmt(result.equilibrium.applied[2], 3)} | ${fmt(result.equilibrium.reaction[2], 3)} | ${fmt(result.equilibrium.residual[2], 3)} |
+| Fx | ${fmt(result.equilibrium.applied[0], 3)} | ${fmt(result.equilibrium.reaction?.[0], 3)} | ${fmt(result.equilibrium.residual?.[0], 3)} |
+| Fy | ${fmt(result.equilibrium.applied[1], 3)} | ${fmt(result.equilibrium.reaction?.[1], 3)} | ${fmt(result.equilibrium.residual?.[1], 3)} |
+| Fz | ${fmt(result.equilibrium.applied[2], 3)} | ${fmt(result.equilibrium.reaction?.[2], 3)} | ${fmt(result.equilibrium.residual?.[2], 3)} |
 
 ---
 
@@ -118,11 +124,11 @@ ${warnings}
 
 工程限制：
 
-1. 体素网格对曲面和薄壁边界采用保守切割，峰值应力对网格尺寸敏感；当前 ${result.mesh.elements.toLocaleString('en-US')} 单元的峰值应力不应直接用于疲劳或断裂评定。
-2. 载荷以节点等分方式施加于外缘约 2.2 个单元宽的节点带，未模拟螺栓预紧、接触、间隙、摩擦或载荷偏心。
-3. 约束为理想 6-DOF 固定面，未模拟螺栓柔度、垫片或基础柔度。
+1. TetGen 基于 STL 三角曲面构造 P1 四面体网格，峰值应力对网格尺寸敏感；当前 ${result.mesh.elements.toLocaleString('en-US')} 单元的峰值应力不应直接用于疲劳或断裂评定。
+2. 载荷以面力施加于包围盒极值面或其邻近面带，未模拟螺栓预紧、接触、间隙、摩擦或载荷偏心。
+3. 约束为理想三平动自由度固定面，未模拟螺栓柔度、垫片或基础柔度。
 4. 材料为室温名义各向同性参数；铝合金焊接热影响区、残余应力与表面处理未建模。
-5. 未进行网格无关性证明时，应补充 h-refinement / 收敛研究；系统已提供 1.8× 加密校核入口。
+5. 未进行网格无关性证明时，应补充 h-refinement / 收敛研究；两级位移对比：${result.convergence ? `粗网格 ${fmt(result.convergence.coarseMaxDisplacement, 5)} mm，细网格 ${fmt(result.convergence.fineMaxDisplacement, 5)} mm，差异 ${fmt(result.convergence.deltaPercent, 2)}%` : '未执行'}。两级对比不构成网格无关性证明。
 6. 未包含重力、热载、疲劳、屈曲、模态、冲击或非线性塑性。
 
 ---
@@ -132,14 +138,15 @@ ${warnings}
 - 文档 schema：${model.schema}
 - 模型版本：${model.revision}
 - 模型指纹：\`${result.modelHash}\`
+- 工况指纹：\`${result.inputFingerprint}\`（含材料、边界条件和网格请求）
 - 求解时间：${new Date(result.createdAt).toISOString()}
-- 求解器：${result.solver.method === 'SfePy' ? 'Gmsh + SfePy / OCCT STEP' : 'VISION C3D8 / PCG-Jacobi v0.1'}
+- 求解器：NVIDIA USD BRep + TetGen + ${result.solver.method}
 - 结果状态：${result.status.toUpperCase()}
 - 签名：____________________（分析）　____________________（复核）
 
 ---
 
-*由 VISION AI-native Engineering Studio 生成。所有数值来自当前浏览器内运行的可复现求解流水线；报告本身不含估算或虚构数据。*
+*由 VISION AI-native Engineering Studio 生成。数值来自本地 TetGen / 有限元求解；未返回的指标标记为未计算或未验证。默认筛选目标并非项目验收标准。*
 `;
 }
 

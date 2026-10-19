@@ -3,6 +3,7 @@ import { buildDeepSeekTools, buildModelContext, directionVector } from '../src/c
 import { parseEngineeringPrompt } from '../src/core/agent/nlu';
 import { isModelDocument, nextProjectCode, seedProjects } from '../src/core/projects';
 import { exportBinaryStl, parseBinaryStl } from '../src/core/cad/stl';
+import { assertFeaResult, type FeaSolveResult } from '../src/services/engineeringBackend';
 import type { GeometryData } from '../src/core/types';
 
 describe('binary STL transport', () => {
@@ -76,5 +77,32 @@ describe('generic modeling tool contract', () => {
     model.externalScript = 'import usd_brep as u\nresult = u.create_box((0,0,0), 100, 20, 10)\n';
     const context = buildModelContext(model, null, false, null, null);
     expect((context.currentModel as { script: string | null }).script).toContain('create_box');
+  });
+});
+
+describe('FEA response boundary', () => {
+  const valid: FeaSolveResult = {
+    schema: 'vision.fea/1', nodes: 1, elements: 1, dofs: 3, h: 1,
+    volume_mm3: 1, mass_kg: 0.0000027, maxVonMises: 1, maxDisplacement: 0.01,
+    maxVonMisesLocation: [0, 0, 0], maxDisplacementLocation: [0, 0, 0], safetyFactor: 276,
+    positions: [0, 0, 0], displacement: [0, 0, 0.01], vonMises: [1], loadArea: 1,
+  };
+  it('accepts a finite dimensionally consistent result', () => {
+    expect(() => assertFeaResult(valid)).not.toThrow();
+  });
+  it('rejects corrupt, mismatched and non-finite solver payloads', () => {
+    for (const patch of [{ schema: 'wrong' }, { nodes: 0 }, { dofs: 4 },
+      { positions: [0] }, { displacement: [0, 0, NaN] }, { vonMises: [-1] },
+      { maxDisplacement: Infinity }, { h: 0 }]) {
+      expect(() => assertFeaResult({ ...valid, ...patch } as FeaSolveResult)).toThrow();
+    }
+  });
+  it('rejects trailing bytes and non-finite STL coordinates', () => {
+    const bytes = new Uint8Array(134);
+    const view = new DataView(bytes.buffer);
+    view.setUint32(80, 1, true);
+    view.setFloat32(96, NaN, true);
+    expect(() => parseBinaryStl(bytes, 'invalid')).toThrow('非有限');
+    expect(() => parseBinaryStl(new Uint8Array(135), 'invalid')).toThrow();
   });
 });
