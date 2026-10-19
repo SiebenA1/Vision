@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import {
   ArrowLeft,
   ArrowUpRight,
@@ -18,6 +18,7 @@ import { useAppStore } from '../../state/store';
 import { getMaterial } from '../../core/materials';
 import { fieldMeta, rampCss } from '../../core/fea/fieldProjection';
 import { fmt } from '../../lib/format';
+import { runValidation } from '../../services/simulation';
 import type { FieldKind } from '../../core/types';
 
 interface AnalysisWorkspaceProps {
@@ -34,11 +35,13 @@ const FIELD_OPTIONS: Array<{ id: FieldKind; label: string; code: string }> = [
 ];
 
 export default function AnalysisWorkspace({ onClose, onRun, onRefine, onExport }: AnalysisWorkspaceProps) {
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const model = useAppStore((state) => state.model);
   const geometry = useAppStore((state) => state.geometry);
   const analysis = useAppStore((state) => state.analysis);
   const status = useAppStore((state) => state.analysisStatus);
   const progress = useAppStore((state) => state.solveProgress);
+  const error = useAppStore((state) => state.analysisError);
   const stale = useAppStore((state) => state.resultStale);
   const validation = useAppStore((state) => state.validation);
   const validationStatus = useAppStore((state) => state.validationStatus);
@@ -55,6 +58,10 @@ export default function AnalysisWorkspace({ onClose, onRun, onRefine, onExport }
   const material = getMaterial(model.materialId);
   const meta = analysis ? fieldMeta(field, material.yieldStrength) : null;
   const busy = ['mesh', 'solve', 'refine'].includes(status);
+  const previousResult = Boolean(analysis && (busy || error || stale));
+  const resultStatus = busy ? (analysis ? '本轮计算中 · 当前显示上一轮结果' : '本轮计算中 · 尚无结果')
+    : error ? '本轮计算失败 · 请查看错误信息' : stale ? '结果已过期 · 请重新计算'
+    : analysis ? '本轮分析已完成' : '尚未分析';
   const sfPass = (analysis?.safetyFactor ?? 0) >= 2;
   const dispPass = (analysis?.maxDisplacement ?? Infinity) <= 2;
   const minField = field === 'safety' ? analysis?.safetyFactor ?? 0 : 0;
@@ -95,13 +102,14 @@ export default function AnalysisWorkspace({ onClose, onRun, onRefine, onExport }
           </span>
         </div>
         <div className="workspace-bar__actions">
+          <button type="button" className="button" aria-expanded={detailsOpen} onClick={() => setDetailsOpen(!detailsOpen)}>设置与诊断</button>
           <button type="button" className="button" onClick={onRun} disabled={busy}>
             <Play size={14} /> {analysis ? '重新求解' : '运行校核'}
           </button>
           <button type="button" className="button" onClick={onRefine} disabled={busy || !analysis}>
-            <RotateCw size={14} /> h 收敛校核
+            <RotateCw size={14} /> h 加密对比
           </button>
-          <button type="button" className="button button--primary" onClick={onExport} disabled={!analysis}>
+          <button type="button" className="button button--primary" onClick={onExport} disabled={!analysis || busy || stale || Boolean(error)}>
             <Download size={14} /> 导出报告
           </button>
           <button type="button" className="icon-button" onClick={onClose} aria-label="关闭分析工作台">
@@ -111,7 +119,7 @@ export default function AnalysisWorkspace({ onClose, onRun, onRefine, onExport }
       </header>
 
       <div className="workspace-body">
-        <aside className="analysis-left">
+        {detailsOpen && <aside className="analysis-left">
           <div className="analysis-section">
             <span className="eyebrow">STUDY TREE</span>
             <div className="study-tree">
@@ -133,30 +141,29 @@ export default function AnalysisWorkspace({ onClose, onRun, onRefine, onExport }
                 <span>BC</span>
                 <div>
                   <b>{model.supports[0]?.name}</b>
-                  <small>{model.supports[0]?.face} · 6 DOF</small>
+                  <small>{model.supports[0]?.face} · 3 DOF</small>
                 </div>
               </div>
               <div className="study-tree__leaf">
                 <span>MSH</span>
                 <div>
                   <b>C3D4 · {analysis ? analysis.mesh.elements.toLocaleString('en-US') : '—'} EL</b>
-                  <small>h {analysis ? fmt(analysis.mesh.cellSize, 2) : '—'} mm · Gmsh</small>
+                  <small>h {analysis ? fmt(analysis.mesh.cellSize, 2) : '—'} mm · TetGen</small>
                 </div>
               </div>
               <div className="study-tree__leaf">
                 <span>SLV</span>
                 <div>
-                  <b>SfePy / Direct</b>
+                  <b>scikit-fem / {analysis?.solver.algorithm ?? 'Direct'}</b>
                   <small>{analysis ? 'linear elastic' : 'not run'}</small>
                 </div>
               </div>
             </div>
           </div>
 
-          <div className="analysis-section">
+          <details className="analysis-section"><summary>网格诊断</summary>
             <div className="analysis-section__head">
-              <span className="eyebrow">MESH DIAGNOSTICS</span>
-              <span className="chip chip--tiny">{analysis?.mesh.grid.join('×') ?? '—'}</span>
+              <span className="chip chip--tiny">{analysis?.mesh.grid?.join('×') ?? '—'}</span>
             </div>
             <div className="stat-grid">
               <div><span>节点</span><b>{analysis?.mesh.nodes.toLocaleString('en-US') ?? '—'}</b></div>
@@ -168,18 +175,20 @@ export default function AnalysisWorkspace({ onClose, onRun, onRefine, onExport }
               <span style={{ width: `${Math.min(100, ((analysis?.mesh.elements ?? 0) / 5000) * 100)}%` }} />
             </div>
             <div className="mesh-bar__label">
-              <span>h {model.mesh.cellSizeMm ?? '—'} mm · 固定网格</span>
-              <span>{analysis ? `${fmt(analysis.mesh.activeNodeRatio * 100, 1)}% 活跃节点` : ''}</span>
+              <span>h {model.mesh.cellSizeMm ?? '—'} mm · 请求尺寸</span>
+              <span>{analysis?.mesh.activeNodeRatio != null ? `${fmt(analysis.mesh.activeNodeRatio * 100, 1)}% 活跃节点` : '质量未验证'}</span>
             </div>
-          </div>
+          </details>
 
-          <div className="analysis-section">
+          <details className="analysis-section"><summary>求解器基准</summary>
             <div className="analysis-section__head">
-              <span className="eyebrow">SOLVER BENCHMARK</span>
               <span className={`chip ${validation?.passed ? 'chip--good' : validation ? 'chip--warn' : ''}`}>
                 {validationStatus === 'running' ? 'RUNNING' : validation?.passed ? 'PASS' : validation ? 'FAIL' : 'PENDING'}
               </span>
             </div>
+            <button type="button" className="button" disabled={busy || validationStatus === 'running'} onClick={() => void runValidation()}>
+              {validationStatus === 'running' ? '解析基准计算中…' : '运行解析基准'}
+            </button>
             {validation ? (
               <>
                 <div className="validation-case">
@@ -203,11 +212,11 @@ export default function AnalysisWorkspace({ onClose, onRun, onRefine, onExport }
               </>
             ) : (
               <div className="panel-loading">
-                <span className="spinner" />
-                <span>解析基准等待求解器空闲…</span>
+                {validationStatus === 'running' && <span className="spinner" />}
+                <span>{validationStatus === 'running' ? '正在计算独立的解析梁基准…' : validationStatus === 'error' ? '解析基准未完成，可手动重试。' : '尚未运行。此检查独立于当前零件分析，按需执行。'}</span>
               </div>
             )}
-          </div>
+          </details>
 
           {analysis && analysis.warnings.length > 0 && (
             <div className="analysis-section">
@@ -225,7 +234,7 @@ export default function AnalysisWorkspace({ onClose, onRun, onRefine, onExport }
               </div>
             </div>
           )}
-        </aside>
+        </aside>}
 
         <section className="analysis-stage">
           <div className="analysis-canvas">
@@ -233,7 +242,7 @@ export default function AnalysisWorkspace({ onClose, onRun, onRefine, onExport }
               geometry={geometry}
               model={model}
               material={material}
-              analysis={analysis}
+              analysis={stale ? null : analysis}
               viewMode={analysis ? viewMode : 'design'}
               field={field}
               deformationScale={deformationScale}
@@ -251,6 +260,7 @@ export default function AnalysisWorkspace({ onClose, onRun, onRefine, onExport }
                   <span>{analysis ? `MAX ${fmt(maxField, meta?.decimals ?? 1)} ${meta?.unit.split(' ')[0] ?? ''}` : 'NO RESULT'}</span>
                   <span>{analysis ? `HASH ${analysis.modelHash}` : ''}</span>
                   {stale && <span className="text-warn">STALE</span>}
+                  <span role="status">{resultStatus}</span>
                 </div>
               </div>
               <div className="field-tabs">
@@ -308,12 +318,14 @@ export default function AnalysisWorkspace({ onClose, onRun, onRefine, onExport }
               <div className="analysis-busy">
                 <span className="spinner spinner--large" />
                 <div>
-                  <b>{status === 'mesh' ? '生成 C3D4 网格' : status === 'refine' ? 'h-加密校核' : 'SfePy 求解'}</b>
+                  <b>{status === 'refine' ? 'h-加密计算中' : '网格生成与静力求解中'}</b>
                   <span>{progress?.detail ?? '初始化…'}</span>
                 </div>
-                <b className="mono">{Math.round(progress?.percent ?? 0)}%</b>
+                {progress?.percent != null && <b className="mono">{Math.round(progress.percent)}%</b>}
               </div>
             )}
+
+            {error && <div className="analysis-status-error" role="alert">本轮分析未完成：{error}{analysis && '。当前显示上一轮结果。'}</div>}
 
             {!analysis && !busy && (
               <div className="analysis-empty">
@@ -348,15 +360,15 @@ export default function AnalysisWorkspace({ onClose, onRun, onRefine, onExport }
               <b>{analysis ? fmt(analysis.massKg, 3) : '—'}</b>
               <small>kg</small>
             </div>
-            <div className="convergence-card">
+            <div className="convergence-card" title="可选的网格精度检查：分别以 h 和 h/1.8 求解，比较最大位移差异。尚未对比不代表静力分析未完成；两级位移对比也不等同于局部应力收敛验证。">
               <div>
-                <span className="eyebrow">H-REFINEMENT</span>
+                <span className="convergence-card__label">网格加密对比</span>
                 <b>
-                  {analysis?.convergence ? `${fmt(analysis.convergence.deltaPercent, 2)}% Δδ` : '未评估'}
+                  {status === 'refine' ? '正在加密对比' : busy ? '等待本轮完成' : stale ? '需重新对比' : analysis?.convergence ? `位移差 ${fmt(analysis.convergence.deltaPercent, 2)}%` : analysis ? '尚未进行对比' : '尚无分析结果'}
                 </b>
               </div>
-              <button type="button" onClick={onRefine} disabled={busy || !analysis}>
-                <ArrowUpRight size={13} /> 1.8×
+              <button type="button" onClick={onRefine} disabled={busy || !analysis} aria-label="运行网格加密对比" title="以当前网格尺寸 h 和 h/1.8 分别求解，比较最大位移差异">
+                <ArrowUpRight size={13} /> 对比
               </button>
             </div>
           </div>
@@ -364,7 +376,8 @@ export default function AnalysisWorkspace({ onClose, onRun, onRefine, onExport }
 
         <aside className="analysis-right">
           <div className="result-hero">
-            <span className="eyebrow">RESULT SUMMARY</span>
+            <span className="eyebrow">{previousResult ? '上一轮结果 · 仅供对照' : 'RESULT SUMMARY'}</span>
+            <p className="analysis-result-status" role="status">{resultStatus}</p>
             <div className={`result-hero__sf ${sfPass ? 'is-good' : 'is-warn'}`}>
               <ShieldCheck size={24} />
               <div>
@@ -396,22 +409,21 @@ export default function AnalysisWorkspace({ onClose, onRun, onRefine, onExport }
           <div className="analysis-section analysis-section--right">
             <span className="eyebrow">UTILIZATION</span>
             <div className="limit-row">
-              <div><span>强度 / SF ≥ 2.0</span><b className={sfPass ? 'text-good' : 'text-bad'}>{sfPass ? 'PASS' : 'REVIEW'}</b></div>
+              <div><span>强度 / SF ≥ 2.0</span><b className={sfPass ? 'text-good' : 'text-bad'}>{busy ? '待本轮结果' : previousResult ? '待重新计算' : !analysis ? '未计算' : sfPass ? 'PASS' : 'REVIEW'}</b></div>
               <div className="limit-bar"><span style={{ width: `${Math.min(100, (analysis ? 2 / analysis.safetyFactor : 0) * 100)}%` }} /></div>
               <small>{analysis ? `${fmt((analysis.maxVonMises / material.yieldStrength) * 100, 1)}% 屈服利用率` : '—'}</small>
             </div>
             <div className="limit-row">
-              <div><span>刚度 / δ ≤ 2.0 mm</span><b className={dispPass ? 'text-good' : 'text-bad'}>{dispPass ? 'PASS' : 'REVIEW'}</b></div>
+              <div><span>刚度 / δ ≤ 2.0 mm</span><b className={dispPass ? 'text-good' : 'text-bad'}>{busy ? '待本轮结果' : previousResult ? '待重新计算' : !analysis ? '未计算' : dispPass ? 'PASS' : 'REVIEW'}</b></div>
               <div className="limit-bar"><span style={{ width: `${Math.min(100, ((analysis?.maxDisplacement ?? 0) / 2) * 100)}%` }} /></div>
               <small>{analysis ? `${fmt(analysis.maxDisplacement, 3)} / 2.000 mm` : '—'}</small>
             </div>
           </div>
 
-          <div className="analysis-section analysis-section--right">
+          <details className="analysis-section analysis-section--right"><summary>平衡校核</summary>
             <div className="analysis-section__head">
-              <span className="eyebrow">EQUILIBRIUM</span>
-              <span className={`chip ${analysis && analysis.equilibrium.relativeError < 1e-4 ? 'chip--good' : 'chip--warn'}`}>
-                {analysis ? analysis.equilibrium.relativeError.toExponential(1) : '—'}
+              <span className={`chip ${analysis?.equilibrium.relativeError != null && analysis.equilibrium.relativeError < 1e-4 ? 'chip--good' : 'chip--warn'}`}>
+                {analysis?.equilibrium.relativeError?.toExponential(1) ?? '未验证'}
               </span>
             </div>
             <table className="mini-table">
@@ -423,42 +435,37 @@ export default function AnalysisWorkspace({ onClose, onRun, onRefine, onExport }
                   <tr key={axis}>
                     <td>{axis.toUpperCase()}</td>
                     <td>{analysis ? fmt(analysis.equilibrium.applied[index], 2) : '—'}</td>
-                    <td>{analysis ? fmt(analysis.equilibrium.reaction[index], 2) : '—'}</td>
-                    <td>{analysis ? fmt(analysis.equilibrium.residual[index], 2) : '—'}</td>
+                    <td>{analysis ? fmt(analysis.equilibrium.reaction?.[index], 2) : '—'}</td>
+                    <td>{analysis ? fmt(analysis.equilibrium.residual?.[index], 2) : '—'}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
             <div className="solver-meta">
-              <span>SfePy direct</span>
+              <span>scikit-fem {analysis?.solver.algorithm ?? 'Direct'}</span>
               <span>P1 tetra</span>
               <span>{analysis ? `${fmt(analysis.solver.solveMs, 0)} ms` : '—'}</span>
             </div>
-          </div>
+          </details>
 
-          <div className="analysis-section analysis-section--right">
-            <span className="eyebrow">TRACEABILITY</span>
+          <details className="analysis-section analysis-section--right"><summary>输入与追溯</summary>
+
             <div className="trace-list">
               <div><span>模型指纹</span><code>{analysis?.modelHash ?? '—'}</code></div>
               <div><span>材料</span><b>{material.shortName}</b></div>
-              <div><span>求解器</span><b>NVIDIA USD BRep + TetGen + SfePy</b></div>
+              <div><span>求解器</span><b>NVIDIA USD BRep + TetGen + scikit-fem</b></div>
               <div><span>时间</span><b>{analysis ? new Date(analysis.createdAt).toLocaleString('zh-CN') : '—'}</b></div>
             </div>
-          </div>
+          </details>
 
           <div className="analysis-disclaimer">
             <Info size={14} />
             <span>
-              线弹性小变形分析。体素边界与理想约束限制峰值应力的绝对精度；疲劳、屈曲、接触与塑性未包含。            </span>
+              线弹性小变形分析。STL 曲面离散、P1 四面体与理想约束限制峰值应力的绝对精度；疲劳、屈曲、接触与塑性未包含。            </span>
           </div>
         </aside>
       </div>
-      <div className="workspace-statusbar">
-        <span><Waves size={12} /> {analysis ? `${analysis.mesh.elements.toLocaleString('en-US')} EL · ${analysis.mesh.dofs.toLocaleString('en-US')} DOF` : 'NO RESULT'}</span>
-        <span><Check size={12} /> {analysis?.solver.converged ? 'SFEPY CONVERGED' : 'PENDING'}</span>
-        <span><ArrowUpRight size={12} /> {analysis ? `STRAIN ENERGY ${fmt(analysis.solver.strainEnergyMj, 1)} mJ` : ''}</span>
-        <span className="workspace-statusbar__right">ESC 返回 · 本地求解 · 无数据外传</span>
-      </div>
+
     </div>
   );
 }

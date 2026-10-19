@@ -1,178 +1,55 @@
-import { ArrowUpRight, Activity, ChevronRight, Gauge, Play, RefreshCw, Waves } from 'lucide-react';
+import { ChevronDown, RefreshCw } from 'lucide-react';
 import { useAppStore } from '../state/store';
 import { fmt } from '../lib/format';
 import type { FieldKind } from '../core/types';
 
-interface ResultStripProps {
-  onRun: () => void;
-  onOpenAnalysis: () => void;
-}
-
-const FIELD_LABELS: Record<FieldKind, string> = {
-  vonMises: 'von Mises',
-  displacement: '位移',
-  safety: '安全系数',
-};
-
-export function ResultStrip({ onRun, onOpenAnalysis }: ResultStripProps) {
+export function ResultStrip({ onRun }: { onRun: () => void }) {
   const analysis = useAppStore((state) => state.analysis);
   const status = useAppStore((state) => state.analysisStatus);
   const progress = useAppStore((state) => state.solveProgress);
+  const error = useAppStore((state) => state.analysisError);
   const stale = useAppStore((state) => state.resultStale);
-  const metrics = useAppStore((state) => state.geometryMetrics);
   const viewMode = useAppStore((state) => state.viewMode);
   const field = useAppStore((state) => state.field);
-  const deformationScale = useAppStore((state) => state.deformationScale);
-  const setViewMode = useAppStore((state) => state.setViewMode);
-  const setField = useAppStore((state) => state.setField);
-  const setDeformationScale = useAppStore((state) => state.setDeformationScale);
+  const scale = useAppStore((state) => state.deformationScale);
   const busy = ['mesh', 'solve', 'refine', 'queued'].includes(status);
-  const sf = analysis?.safetyFactor ?? 0;
-  const sfTone = sf >= 2 ? 'good' : sf >= 1 ? 'warn' : 'bad';
-  const mass = analysis?.massKg ?? metrics?.massKg;
-  const isBlank = useAppStore((state) => (state.model.template ?? 'bracket') === 'empty');
-  const progressPercent = Math.min(100, Math.max(2, progress?.percent ?? (status === 'ready' ? 100 : 0)));
-
+  if (!analysis && !busy && !error) return null;
   return (
-    <section className={`result-strip ${busy ? 'is-busy' : ''}`} aria-label="分析结果">
-      <div className="result-strip__lead">
-        <div className="study-state">
-          <span className={`study-state__dot study-state__dot--${busy ? 'busy' : analysis ? 'ready' : 'idle'}`} />
-          <div>
-            <span className="eyebrow">STATIC STUDY / LC-01</span>
-            <b>{busy ? '求解进行中' : analysis ? (stale ? '结果已过期' : '校核完成') : '尚未校核'}</b>
-          </div>
-        </div>
-        {busy ? (
-          <div className="solve-progress">
-            <div className="solve-progress__bar">
-              <span style={{ width: `${progressPercent}%` }} />
-            </div>
-            <div className="solve-progress__meta">
-              <span>{progress?.detail ?? '初始化求解器'}</span>
-              <b>{progressPercent.toFixed(0)}%</b>
-            </div>
-          </div>
-        ) : (
-          <div className="study-meta">
-            <span>{analysis ? `${analysis.solver.method} · ${analysis.mesh.elements.toLocaleString('en-US')} EL` : 'TETGEN / SFEPY'}</span>
-            <span>{analysis ? 'TETGEN + SFEPY' : 'NO RESULT'}</span>
-            {analysis?.convergence && <span>Δh {fmt(analysis.convergence.deltaPercent, 1)}%</span>}
-          </div>
-        )}
+    <section className={`result-strip ${analysis && !busy ? 'has-results' : ''}`} aria-label="分析摘要" aria-busy={busy}>
+      <div className="result-strip__summary">
+      <div className="result-strip__head">
+        <b role="status">{busy ? '正在分析…' : error ? '分析未完成' : stale ? '结果已过期' : '分析结果'}</b>
+        {busy && <progress max={100} value={progress?.percent ?? undefined} aria-label="求解进度" />}
+        {error && <span className="text-bad">{error}</span>}
+        {stale && !busy && <button type="button" className="button" onClick={onRun}><RefreshCw size={16} />重新求解</button>}
       </div>
-
-      <div className="metric-row">
-        <div className="metric">
-          <div className="metric__icon"><Gauge size={14} /></div>
-          <div>
-            <span className="metric__label">质量 MASS</span>
-            <div className="metric__value">
-              <b>{mass !== undefined ? fmt(mass, 3) : '—'}</b>
-              <small>kg</small>
-            </div>
-          </div>
-        </div>
-        <div className="metric">
-          <div className="metric__icon"><Activity size={14} /></div>
-          <div>
-            <span className="metric__label">最大应力 σvM</span>
-            <div className="metric__value">
-              <b>{analysis ? fmt(analysis.maxVonMises, 1) : '—'}</b>
-              <small>MPa</small>
-            </div>
-          </div>
-        </div>
-        <div className="metric">
-          <div className="metric__icon"><Waves size={14} /></div>
-          <div>
-            <span className="metric__label">最大位移 δmax</span>
-            <div className="metric__value">
-              <b>{analysis ? fmt(analysis.maxDisplacement, 3) : '—'}</b>
-              <small>mm</small>
-            </div>
-          </div>
-        </div>
-        <div className={`metric metric--safety metric--${sfTone}`}>
-          <div className="metric__icon"><span>SF</span></div>
-          <div>
-            <span className="metric__label">安全系数 SAFETY</span>
-            <div className="metric__value">
-              <b>{analysis ? fmt(analysis.safetyFactor, 2) : '—'}</b>
-              <small>/ 2.00</small>
-            </div>
-          </div>
-        </div>
+      {analysis && !busy &&
+        <dl className={`metric-row ${stale ? 'is-stale' : ''}`}>
+          {[
+            ['最大应力', fmt(analysis.maxVonMises, 1), 'MPa'],
+            ['最大位移', fmt(analysis.maxDisplacement, 3), 'mm'],
+            ['安全系数', fmt(analysis.safetyFactor, 2), 'SF'],
+          ].map(([label, value, unit]) => (
+            <div className="metric" key={label}><dt className="metric__label">{label}</dt>
+              <dd className="metric__value"><b>{value}</b><small>{unit}</small></dd></div>
+          ))}
+        </dl>}
       </div>
-
-      <div className="result-strip__actions">
-        {analysis && (
-          <div className="result-controls">
-            <div className="segmented segmented--small" role="group" aria-label="显示模式">
-              <button
-                type="button"
-                className={viewMode === 'design' ? 'is-active' : ''}
-                onClick={() => setViewMode('design')}
-              >
-                设计
-              </button>
-              <button
-                type="button"
-                className={viewMode === 'result' ? 'is-active' : ''}
-                onClick={() => setViewMode('result')}
-              >
-                结果场
-              </button>
-            </div>
-            {viewMode === 'result' && (
-              <>
-                <select
-                  className="select select--compact"
-                  value={field}
-                  onChange={(event) => setField(event.target.value as FieldKind)}
-                  aria-label="结果场"
-                >
-                  {(Object.keys(FIELD_LABELS) as FieldKind[]).map((key) => (
-                    <option key={key} value={key}>
-                      {FIELD_LABELS[key]}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  type="button"
-                  className="scale-chip"
-                  title="循环变形放大系数"
-                  onClick={() => {
-                    const next = deformationScale >= 50 ? 1 : deformationScale >= 10 ? 50 : 10;
-                    setDeformationScale(next);
-                  }}
-                >
-                  ×{deformationScale}
-                </button>
-              </>
-            )}
+      {analysis && !busy && !stale && <div className="result-strip__actions">
+          <div className="segmented" role="group" aria-label="显示模式">
+            <button type="button" aria-pressed={viewMode === 'design'} className={viewMode === 'design' ? 'is-active' : ''} onClick={() => useAppStore.getState().setViewMode('design')}>模型</button>
+            <button type="button" aria-pressed={viewMode === 'result'} className={viewMode === 'result' ? 'is-active' : ''} onClick={() => useAppStore.getState().setViewMode('result')}>结果场</button>
           </div>
-        )}
-        {stale && (
-          <button type="button" className="button button--ghost" onClick={onRun}>
-            <RefreshCw size={13} /> 刷新结果
-          </button>
-        )}
-        {!analysis && !busy && !isBlank && (
-          <button type="button" className="button button--ghost" onClick={onRun}>
-            <Play size={13} /> 运行基线校核
-          </button>
-        )}
-        {isBlank && !busy && (
-          <span className="result-strip__hint">空白工程 · 请先添加基础体</span>
-        )}
-        <button type="button" className="button button--dark" onClick={onOpenAnalysis}>
-          分析工作台 <ArrowUpRight size={14} />
-        </button>
-        <button type="button" className="icon-button result-strip__chevron" onClick={onOpenAnalysis} aria-label="打开分析">
-          <ChevronRight size={15} />
-        </button>
-      </div>
+          {viewMode === 'result' && <div className="result-strip__field-controls">
+            <select className="select select--compact" value={field} aria-label="结果场" onChange={(event) => useAppStore.getState().setField(event.target.value as FieldKind)}>
+              <option value="vonMises">等效应力</option><option value="displacement">位移</option><option value="safety">安全系数</option>
+            </select>
+            <details className="display-options"><summary>变形 ×{scale}<ChevronDown size={16} aria-hidden="true" /></summary><label>变形放大倍数
+              <select className="select" value={scale} onChange={(event) => useAppStore.getState().setDeformationScale(Number(event.target.value))}>
+                {[1, 10, 50].map((value) => <option value={value} key={value}>×{value}</option>)}
+              </select></label></details>
+          </div>}
+      </div>}
     </section>
   );
 }

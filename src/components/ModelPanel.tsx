@@ -19,6 +19,8 @@ import {
   Redo2,
 } from 'lucide-react';
 import type { FeatureDescriptor } from '../core/types';
+import { NativeCadPanel } from './NativeCadPanel';
+import { StudyEditor } from './StudyEditor';
 import { MATERIALS, materialOptionsByFamily } from '../core/materials';
 import { useAppStore } from '../state/store';
 import { fmt } from '../lib/format';
@@ -332,14 +334,15 @@ export function ModelPanel() {
           <HistoryPanel />
         ) : (
           <>
-            <div className="design-intent">
-              <span className="design-intent__label">DESIGN INTENT</span>
+            <details className="design-intent"><summary>设计说明</summary>
               <p>{model.meta.designIntent}</p>
               <div className="design-intent__meta">
                 <span>{model.meta.client}</span>
                 <span>{model.meta.discipline}</span>
               </div>
-            </div>
+            </details>
+            <NativeCadPanel key={`${model.cad?.artifactId ?? model.id}`} />
+            {!blank && <StudyEditor key={`${model.cad?.artifactId ?? model.id}:${JSON.stringify([model.supports, model.loads, model.mesh, model.studyBodyIds])}`} />}
             {blank ? (
               <div className="blank-starter">
                 <div className="blank-starter__head">
@@ -356,14 +359,10 @@ export function ModelPanel() {
                 </div>
               </div>
             ) : (
-              <FeatureTree />
+              <details className="panel-disclosure"><summary>特征与参数</summary><FeatureTree /></details>
             )}
             {!blank && (
-              <div className="geometry-readout">
-                <div className="panel-section__head">
-                  <span>几何健康 / GEOMETRY</span>
-                  <span className="chip chip--good">{geometry ? 'WATERTIGHT' : 'WAITING'}</span>
-                </div>
+              <details className="geometry-readout"><summary>几何详情</summary>
                 <div className="readout-grid">
                   <div>
                     <span>体积</span>
@@ -391,7 +390,7 @@ export function ModelPanel() {
                   <code>{metrics?.watermark ?? '—'}</code>
                   <span className="hash-row__time">{metrics ? `${metrics.buildMs.toFixed(0)} ms` : ''}</span>
                 </div>
-              </div>
+              </details>
             )}
             <div className="material-strip">
               <span className="material-strip__swatch" style={{ background: material.color }} />
@@ -399,37 +398,12 @@ export function ModelPanel() {
                 <span className="eyebrow">MATERIAL</span>
                 <b>{material.shortName}</b>
               </div>
-              <div className="material-strip__props">
-                <span>E {fmt(material.E / 1000, 0)} GPa</span>
-                <span>σy {material.yieldStrength} MPa</span>
-                <span>ρ {material.rho}</span>
-              </div>
-              <button type="button" onClick={() => useAppStore.getState().setRail('materials')}>
+              <button type="button" aria-label="修改材料" onClick={() => useAppStore.getState().setRail('materials')}>
                 <ChevronRight size={14} />
               </button>
             </div>
-            <div className="panel-footnote">
-              <Cuboid size={13} />
-              <span>
-                {(model.template ?? 'bracket') === 'external'
-                  ? 'NVIDIA USD BRep kernel · NURBS B-Rep · exact metrics'
-                  : 'Manifold kernel · exact planar / quadric profiles · robust booleans'}
-              </span>
-            </div>
           </>
         )}
-      </div>
-      <div className="model-panel__footer">
-        <span>
-          <ArrowDownToLine size={12} /> mm
-        </span>
-        <span>
-          <ArrowUpFromLine size={12} /> N
-        </span>
-        <span>
-          <RotateCcw size={12} /> MPa
-        </span>
-        <span className="model-panel__footer-right">{model.revision}</span>
       </div>
     </aside>
   );

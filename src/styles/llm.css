@@ -16,7 +16,7 @@
   border-radius: 3px;
   background: var(--panel-2);
   font-family: var(--font-mono);
-  font-size: 6.5px;
+  font-size: 14px;
   font-weight: 700;
   letter-spacing: 0.05em;
   color: var(--muted);
@@ -85,7 +85,7 @@
 
 .chat-message--system .chat-message__content {
   color: var(--warn);
-  font-size: 10.5px;
+  font-size: 14px;
 }
 
 .agent-reasoning {
@@ -104,7 +104,7 @@
   cursor: pointer;
   list-style: none;
   font-family: var(--font-mono);
-  font-size: 7.5px;
+  font-size: 14px;
   letter-spacing: 0.04em;
   color: var(--good);
   user-select: none;
@@ -117,7 +117,7 @@
 .agent-reasoning > summary span {
   margin-left: auto;
   color: var(--muted-2);
-  font-size: 6.5px;
+  font-size: 14px;
 }
 
 .agent-reasoning[open] > summary {
@@ -131,7 +131,7 @@
   white-space: pre-wrap;
   color: #586250;
   font-family: var(--font-mono);
-  font-size: 7.5px;
+  font-size: 14px;
   line-height: 1.55;
 }
 
@@ -163,7 +163,7 @@
   padding-top: 5px;
   border-top: 1px dashed var(--line);
   font-family: var(--font-mono);
-  font-size: 6.5px;
+  font-size: 14px;
   letter-spacing: 0.03em;
   color: var(--muted-2);
 }
@@ -207,14 +207,14 @@
 }
 
 .llm-setup-banner b {
-  font-size: 9.5px;
+  font-size: 14px;
   font-weight: 650;
   color: var(--ink-soft);
 }
 
 .llm-setup-banner small {
   font-family: var(--font-mono);
-  font-size: 6.5px;
+  font-size: 14px;
   color: var(--muted);
 }
 
@@ -245,19 +245,19 @@
   background: var(--accent-soft);
   color: var(--accent-deep);
   font-family: var(--font-display);
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .blank-copilot-hint b {
   display: block;
   margin-top: 2px;
-  font-size: 10.5px;
+  font-size: 14px;
   color: var(--ink-soft);
 }
 
 .blank-copilot-hint p {
   margin-top: 3px;
-  font-size: 8.5px;
+  font-size: 14px;
   line-height: 1.5;
   color: var(--muted);
 }
@@ -382,7 +382,7 @@
 
 .settings-copy {
   margin-top: 7px;
-  font-size: 9.5px;
+  font-size: 14px;
   line-height: 1.55;
   color: var(--muted);
 }
@@ -392,7 +392,7 @@
   border-radius: 2px;
   background: var(--panel-3);
   font-family: var(--font-mono);
-  font-size: 8px;
+  font-size: 14px;
   color: var(--ink-soft);
 }
 
@@ -404,7 +404,7 @@
   border: 1px solid var(--line);
   border-radius: 3px;
   font-family: var(--font-mono);
-  font-size: 6.5px;
+  font-size: 14px;
   letter-spacing: 0.04em;
   color: var(--muted);
   white-space: nowrap;
@@ -442,7 +442,7 @@
   margin-top: 9px;
   padding: 9px 10px;
   border-radius: 4px;
-  font-size: 9px;
+  font-size: 14px;
   line-height: 1.5;
 }
 
@@ -459,7 +459,7 @@
 
 .settings-callout b {
   display: block;
-  font-size: 9.5px;
+  font-size: 14px;
   color: var(--good);
 }
 
@@ -477,7 +477,7 @@
 
 .settings-label > span {
   font-family: var(--font-mono);
-  font-size: 7.5px;
+  font-size: 14px;
   letter-spacing: 0.04em;
   color: var(--muted);
 }
@@ -485,7 +485,7 @@
 .settings-label > span small {
   margin-left: 4px;
   color: var(--muted-2);
-  font-size: 6.5px;
+  font-size: 14px;
 }
 
 .settings-key {
@@ -521,7 +521,7 @@
   outline: 0;
   background: transparent;
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 14px;
   letter-spacing: 0.02em;
 }
 
@@ -540,7 +540,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 9px;
+  font-size: 14px;
   color: var(--muted);
   cursor: pointer;
 }
@@ -556,7 +556,7 @@
   padding: 3px 4px;
   border-radius: 2px;
   color: var(--muted);
-  font-size: 8.5px;
+  font-size: 14px;
 }
 
 .text-button:hover {
@@ -581,7 +581,7 @@
   align-items: center;
   gap: 4px;
   max-width: 430px;
-  font-size: 8.5px;
+  font-size: 14px;
   line-height: 1.35;
 }
 
@@ -643,12 +643,12 @@
 }
 
 .settings-switch-line b {
-  font-size: 9.5px;
+  font-size: 14px;
   font-weight: 600;
 }
 
 .settings-switch-line small {
-  font-size: 7.5px;
+  font-size: 14px;
   color: var(--muted-2);
   white-space: nowrap;
   overflow: hidden;
@@ -722,7 +722,7 @@
 .settings-range b {
   width: 30px;
   font-family: var(--font-mono);
-  font-size: 9px;
+  font-size: 14px;
   font-weight: 500;
   text-align: right;
 }
@@ -746,7 +746,7 @@
 .settings-usage small {
   display: block;
   font-family: var(--font-mono);
-  font-size: 6.5px;
+  font-size: 14px;
   color: var(--muted-2);
 }
 
@@ -763,12 +763,12 @@
 }
 
 .settings-section--security b {
-  font-size: 9.5px;
+  font-size: 14px;
 }
 
 .settings-section--security p {
   margin-top: 3px;
-  font-size: 8.5px;
+  font-size: 14px;
   line-height: 1.55;
   color: var(--muted);
 }
@@ -789,7 +789,7 @@
   align-items: center;
   gap: 5px;
   font-family: var(--font-mono);
-  font-size: 7px;
+  font-size: 14px;
   letter-spacing: 0.06em;
   color: var(--muted);
 }

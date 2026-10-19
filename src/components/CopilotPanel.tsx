@@ -5,20 +5,16 @@ import {
   Brain,
   Check,
   Circle,
-  Cpu,
   Loader2,
   PanelRightClose,
-  Paperclip,
   Send,
   Settings2,
   Sparkles,
   Square,
-  TerminalSquare,
 } from 'lucide-react';
 import { useAppStore } from '../state/store';
-import { llmModelLabel, useLlmStore } from '../state/llmStore';
+import { useLlmStore } from '../state/llmStore';
 import { stopAgent } from '../services/agent';
-import { getMaterial } from '../core/materials';
 import type { ChatMessage } from '../core/types';
 
 interface CopilotPanelProps {
@@ -75,13 +71,7 @@ function Message({ message, onChip, busy }: { message: ChatMessage; onChip: (tex
         <AgentMark size={24} />
         <div>
           <b>{source === 'system' ? 'SYSTEM' : 'ATLAS'}</b>
-          <small>
-            {source === 'deepseek'
-              ? `${message.meta?.model ?? 'DEEPSEEK'} · TOOL CALLING`
-              : source === 'system'
-                ? 'SYSTEM NOTICE'
-                : 'LOCAL PLANNER · DETERMINISTIC'}
-          </small>
+
         </div>
         <span className="chat-message__time">
           {new Date(message.createdAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
@@ -99,7 +89,7 @@ function Message({ message, onChip, busy }: { message: ChatMessage; onChip: (tex
           </details>
         )}
         {message.steps && message.steps.length > 0 && (
-          <div className="agent-plan">
+          <details className="agent-plan" open={message.streaming}><summary>{message.steps.some((step) => step.status === 'error') ? '操作未完成 · 查看详情' : message.streaming ? '正在执行操作…' : '查看操作详情'}</summary>
             {message.steps.map((step) => (
               <div key={step.id} className={`agent-step agent-step--${step.status}`}>
                 <span className="agent-step__icon">
@@ -117,7 +107,7 @@ function Message({ message, onChip, busy }: { message: ChatMessage; onChip: (tex
                 {step.detail && <span className="agent-step__detail">{step.detail}</span>}
               </div>
             ))}
-          </div>
+          </details>
         )}
         {message.content && (
           <div className={`chat-message__content ${message.streaming ? 'is-streaming' : ''}`}>
@@ -135,14 +125,14 @@ function Message({ message, onChip, busy }: { message: ChatMessage; onChip: (tex
           </div>
         )}
         {message.usage && (
-          <div className="chat-usage">
+          <details className="chat-usage"><summary>调用信息</summary>
             <span>{message.meta?.model ?? 'DEEPSEEK'}</span>
             <span>{message.usage.totalTokens.toLocaleString('en-US')} tokens</span>
             {message.usage.reasoningTokens ? (
               <span>{message.usage.reasoningTokens.toLocaleString('en-US')} think</span>
             ) : null}
             {message.latencyMs ? <span>{message.latencyMs} ms</span> : null}
-          </div>
+          </details>
         )}
       </div>
     </div>
@@ -150,12 +140,8 @@ function Message({ message, onChip, busy }: { message: ChatMessage; onChip: (tex
 }
 
 const SUGGESTIONS = [
-  { label: '风电叶片', prompt: '帮我建模一个风电的扇叶，NACA 翼型沿展向放样，带扭角和弦长分布。' },
-  { label: '刹车踏板支架', prompt: '帮我建模一个刹车踏板支架，包含安装背板、双侧叉板、枢轴座和踏板臂。' },
-  { label: '基线校核', prompt: '运行一次基线校核，并解释最大应力出现的位置。' },
-  { label: '轻量化优化', prompt: '以质量最小为目标，安全系数不低于 2.0，位移不超过 2.0 mm，优化悬臂厚度。' },
-  { label: '提高载荷', prompt: '把端部载荷提高到 1200 N，然后重新校核。' },
-  { label: '换成 7075', prompt: '材料换成 7075-T6，保持当前载荷，重新校核。' },
+  { label: '运行校核', prompt: '运行一次基线校核，并解释结果。' },
+  { label: '解释风险', prompt: '解释当前模型的主要风险和分析限制。' },
 ];
 
 export function CopilotPanel({ onSend }: CopilotPanelProps) {
@@ -164,10 +150,7 @@ export function CopilotPanel({ onSend }: CopilotPanelProps) {
   const agentSource = useAppStore((state) => state.agentSource);
   const copilotCollapsed = useAppStore((state) => state.copilotCollapsed);
   const toggleCopilot = useAppStore((state) => state.toggleCopilot);
-  const addToast = useAppStore((state) => state.addToast);
   const model = useAppStore((state) => state.model);
-  const loadMagnitude = model.loads[0]?.magnitude ?? 0;
-  const material = getMaterial(model.materialId);
   const llmSettings = useLlmStore((state) => state.settings);
   const serverKey = useLlmStore((state) => state.serverKey);
   const apiKeyPresent = useLlmStore((state) => state.apiKeyPresent);
@@ -175,12 +158,7 @@ export function CopilotPanel({ onSend }: CopilotPanelProps) {
   const openSettings = useLlmStore((state) => state.openSettings);
   const configured = serverKey || apiKeyPresent;
   const llmError = configured && llmConnectionStatus === 'error';
-  const modelLabel = configured ? llmModelLabel(llmSettings) : 'LOCAL PLANNER';
   const isBlankProject = (model.template ?? 'bracket') === 'empty';
-  const isCsgProject = model.template === 'csg';
-  const visibleSuggestions = isCsgProject
-    ? SUGGESTIONS.filter((suggestion) => !suggestion.label.includes('优化') && suggestion.label !== '刹车踏板支架')
-    : SUGGESTIONS;
   const streamingDeepSeek = busy && agentSource === 'deepseek';
   const [draft, setDraft] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -192,16 +170,18 @@ export function CopilotPanel({ onSend }: CopilotPanelProps) {
   }, [chat]);
 
   useEffect(() => {
-    if (copilotCollapsed) return;
     const handler = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault();
-        inputRef.current?.focus();
+        if (copilotCollapsed) {
+          toggleCopilot();
+          window.setTimeout(() => inputRef.current?.focus(), 0);
+        } else inputRef.current?.focus();
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [copilotCollapsed]);
+  }, [copilotCollapsed, toggleCopilot]);
 
   if (copilotCollapsed) {
     return (
@@ -229,23 +209,14 @@ export function CopilotPanel({ onSend }: CopilotPanelProps) {
           <AgentMark size={30} />
           <div>
             <div className="copilot__name">
-              ATLAS{' '}
-              <button
-                type="button"
-                className={`agent-engine-chip ${configured ? 'is-live' : ''} ${llmError ? 'is-error' : ''}`}
-                onClick={openSettings}
-                title="配置 DeepSeek"
-              >
-                <span />
-                {configured ? (llmError ? 'DEEPSEEK ERR' : 'DEEPSEEK') : 'LOCAL'}
-              </button>
+              ATLAS
             </div>
             <span className="copilot__sub">
               {llmError
                 ? '上次调用失败 · 点击检查 API Key / 网关'
                 : configured
-                  ? `${modelLabel} · 流式工具调用${llmSettings.thinking ? ' · 思考模式' : ''}`
-                  : '确定性规划器 · 点击配置 DeepSeek'}
+                  ? '建模与工程分析'
+                  : '配置 AI 后开始建模'}
             </span>
           </div>
         </div>
@@ -257,17 +228,6 @@ export function CopilotPanel({ onSend }: CopilotPanelProps) {
             <PanelRightClose size={15} />
           </button>
         </div>
-      </div>
-
-      <div className="copilot__context">
-        <span className="context-chip">
-          <span className="context-chip__dot" /> {model.code}
-        </span>
-        <span className="context-chip">{material.shortName}</span>
-        <span className="context-chip">{loadMagnitude} N</span>
-        <span className={`context-chip ${configured ? 'context-chip--llm' : 'context-chip--muted'}`}>
-          <Cpu size={9} /> {configured ? (llmSettings.model === 'deepseek-v4-pro' ? 'V4 PRO' : 'FLASH') : 'LOCAL'}
-        </span>
       </div>
 
       <div className="copilot__scroll" ref={scrollRef}>
@@ -287,8 +247,8 @@ export function CopilotPanel({ onSend }: CopilotPanelProps) {
                 <ArrowUp size={12} />
               </button>
             )}
-            <span className="eyebrow">NEXT ACTION</span>
-            {visibleSuggestions.map((suggestion) => (
+
+            {SUGGESTIONS.map((suggestion) => (
               <button key={suggestion.label} type="button" onClick={() => onSend(suggestion.prompt)} disabled={busy}>
                 <span>{suggestion.label}</span>
                 <ArrowUp size={12} />
@@ -302,8 +262,8 @@ export function CopilotPanel({ onSend }: CopilotPanelProps) {
             <span className="blank-copilot-hint__mark">V</span>
             <div>
               <span className="eyebrow">BLANK PROJECT</span>
-              <b>先建立第一块几何</b>
-              <p>在模型面板或视口中央选择基础板、基础块或圆柱体，然后即可分析、优化或让 ATLAS 继续编辑。</p>
+              <b>描述你要设计的零件</b>
+              <p>例如：创建一块长 100、宽 50、厚 8 mm 的板，中心开直径 12 mm 的通孔。</p>
             </div>
           </div>
         )}
@@ -319,35 +279,17 @@ export function CopilotPanel({ onSend }: CopilotPanelProps) {
       </div>
 
       <div className="copilot__composer">
-        <div className="composer-tools">
-          <span className="composer-context">
-            <TerminalSquare size={12} /> {configured ? 'DEEPSEEK · STREAM + TOOLS' : 'LOCAL · CONTEXT: 模型 + 结果'}
-          </span>
-          <button
-            type="button"
-            className="composer-tool"
-            onClick={() =>
-              addToast({
-                title: '上下文附件',
-                detail: '当前版本已支持模型/结果上下文；STEP / CSV 文件解析在路线图中。',
-                tone: 'neutral',
-              })
-            }
-            title="上下文说明"
-          >
-            <Paperclip size={14} />
-          </button>
-        </div>
         <div className={`composer-box ${busy ? 'is-busy' : ''}`}>
           <textarea
             id="copilot-input"
             ref={inputRef}
             value={draft}
             rows={2}
-            placeholder="描述目标、尺寸、工况或优化约束…"
+            aria-label="工程需求"
+            placeholder="描述零件、尺寸或需要修改的内容…"
             onChange={(event) => setDraft(event.target.value)}
             onKeyDown={(event) => {
-              if (event.key === 'Enter' && !event.shiftKey) {
+              if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
                 event.preventDefault();
                 submit();
               }
@@ -370,7 +312,7 @@ export function CopilotPanel({ onSend }: CopilotPanelProps) {
           </div>
         </div>
         <div className="composer-note">
-          Enter 发送 · Shift+Enter 换行 · {configured ? 'DeepSeek 仅通过本地网关访问' : '配置 Key 后启用大模型规划'}
+          Enter 发送 · Shift+Enter 换行
         </div>
       </div>
     </aside>

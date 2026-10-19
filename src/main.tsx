@@ -7,6 +7,7 @@ import './styles/panels.css';
 import './styles/workspaces.css';
 import './styles/llm.css';
 import './styles/projects.css';
+import './styles/workbench.css';
 import { createRoot } from 'react-dom/client';
 import App from './App';
 

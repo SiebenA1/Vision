@@ -1,5 +1,5 @@
-import { Suspense, lazy, useEffect, useRef, useState } from 'react';
-import { AlertTriangle, CheckCircle2, Info, PanelLeftOpen, X } from 'lucide-react';
+import { Suspense, lazy, useEffect, useState } from 'react';
+import { AlertTriangle, CheckCircle2, Info, X } from 'lucide-react';
 import { TopBar } from './components/TopBar';
 import { LlmSettingsModal } from './components/LlmSettingsModal';
 import { ProjectCenterModal } from './components/ProjectCenterModal';
@@ -13,6 +13,7 @@ import { runStudy } from './services/simulation';
 import { sendAgentPrompt } from './services/agent';
 import { resetDeepSeekConversation } from './services/deepseekAgent';
 import { fmt } from './lib/format';
+import { exportBinaryStl } from './core/cad/stl';
 
 const AnalysisWorkspace = lazy(() => import('./features/analysis/AnalysisWorkspace'));
 
@@ -65,33 +66,12 @@ export default function App() {
   const model = useAppStore((state) => state.model);
   const activeWorkspace = useAppStore((state) => state.activeWorkspace);
   const leftCollapsed = useAppStore((state) => state.leftCollapsed);
-  const toggleLeft = useAppStore((state) => state.toggleLeft);
   const addToast = useAppStore((state) => state.addToast);
   const settingsOpen = useLlmStore((state) => state.settingsOpen);
   const closeLlmSettings = useLlmStore((state) => state.closeSettings);
   const [projectCenterOpen, setProjectCenterOpen] = useState(false);
-  const firstModelEffect = useRef(true);
-  const variableSignature = JSON.stringify({
-    code: model.code,
-    name: model.name,
-    template: model.template ?? 'bracket',
-    materialId: model.materialId,
-    variables: model.variables.map((variable) => [variable.key, variable.value]),
-    solidFeatures: (model.solidFeatures ?? []).map((feature) => [
-      feature.id,
-      feature.shape,
-      feature.operation,
-      feature.enabled,
-      feature.position,
-      feature.rotation,
-      feature.size,
-      feature.radius,
-      feature.height,
-      feature.axis,
-    ]),
-    loads: model.loads.map((load) => [load.face, load.magnitude, load.vector, load.enabled]),
-    supports: model.supports.map((support) => [support.face, support.enabled]),
-  });
+  const geometrySignature = model.cad?.nativeSha256 ?? model.externalStlBase64 ?? '';
+  const modelSignature = JSON.stringify(model);
 
   useEffect(() => {
     void useAppStore.getState().rebuildGeometry();
@@ -99,27 +79,25 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (firstModelEffect.current) {
-      firstModelEffect.current = false;
-      return;
-    }
     const timer = window.setTimeout(() => {
       void useAppStore.getState().rebuildGeometry();
     }, 180);
     return () => window.clearTimeout(timer);
-  }, [variableSignature]);
+  }, [geometrySignature]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
       useAppStore.getState().syncProject();
     }, 650);
     return () => window.clearTimeout(timer);
-  }, [variableSignature]);
+  }, [modelSignature]);
 
   useEffect(() => {
     const persist = () => useAppStore.getState().syncProject();
+    const failed = () => useAppStore.getState().addToast({ title: '工程保存失败', detail: '本地存储空间不足。请导出工程数据后清理空间。', tone: 'error' });
     window.addEventListener('beforeunload', persist);
-    return () => window.removeEventListener('beforeunload', persist);
+    window.addEventListener('vision:persistence-error', failed);
+    return () => { window.removeEventListener('beforeunload', persist); window.removeEventListener('vision:persistence-error', failed); };
   }, []);
 
   useEffect(() => {
@@ -145,7 +123,7 @@ export default function App() {
     if (!state.geometry && (state.model.template ?? 'bracket') === 'empty') {
       addToast({
         title: '空白工程：先添加基础体',
-        detail: '分析工作台需要几何体和网格。请先在模型面板选择基础体。',
+        detail: '请先通过 ATLAS 生成 USD BRep 几何。',
         tone: 'neutral',
       });
       if (state.leftCollapsed) state.toggleLeft();
@@ -161,7 +139,7 @@ export default function App() {
     if (!useAppStore.getState().geometry) {
       addToast({
         title: '尚无几何',
-        detail: '先用 build123d 描述零件；OCCT 会生成精确 B-Rep。',
+        detail: '先通过 ATLAS 生成 NVIDIA USD BRep 几何。',
         tone: 'neutral',
       });
       if (useAppStore.getState().leftCollapsed) useAppStore.getState().toggleLeft();
@@ -180,10 +158,7 @@ export default function App() {
       addToast({ title: '无几何可导出', detail: '请等待参数化重建完成。', tone: 'warning' });
       return;
     }
-    const [{ exportBinaryStl }, { downloadBinary }] = await Promise.all([
-      import('./core/cad/stl'),
-      import('./core/report/report'),
-    ]);
+    const { downloadBinary } = await import('./core/report/report');
     const buffer = await exportBinaryStl(state.geometry);
     downloadBinary(`VISION_${state.model.code}_${state.geometry.watermark}.stl`, buffer, 'model/stl');
     addToast({ title: 'STL 已导出', detail: `${state.geometry.triangleCount.toLocaleString('en-US')} triangles · watertight`, tone: 'success' });
@@ -191,7 +166,7 @@ export default function App() {
 
   const exportReport = async () => {
     let result = useAppStore.getState().analysis;
-    if (!result || useAppStore.getState().resultStale) {
+    if (!result || useAppStore.getState().resultStale || ['mesh', 'solve', 'refine', 'queued'].includes(useAppStore.getState().analysisStatus)) {
       result = await runStudy({ focusResult: false, silentToast: true });
     }
     if (!result) {
@@ -209,7 +184,7 @@ export default function App() {
   };
 
   const reset = () => {
-    if (!window.confirm('重置为 BRK-042 示例项目？当前未导出的编辑和结果将丢失。')) return;
+    if (!window.confirm('重置当前工程为空白工程？当前未导出的编辑和结果将丢失。')) return;
     useAppStore.getState().resetProject();
     resetDeepSeekConversation();
     window.setTimeout(() => {
@@ -224,7 +199,7 @@ export default function App() {
           if (!useAppStore.getState().geometry) {
             addToast({
               title: '空白工程：先添加基础体',
-              detail: '请选择基础板 / 基础块 / 圆柱体，再运行静力校核。',
+              detail: '请先通过 ATLAS 生成 USD BRep 几何，再运行静力校核。',
               tone: 'neutral',
             });
             if (useAppStore.getState().leftCollapsed) useAppStore.getState().toggleLeft();
@@ -244,16 +219,9 @@ export default function App() {
         }}
       />
       <div className="app-body">
-        <ToolRail onOpenAnalysis={openAnalysis} />
-        {leftCollapsed ? (
-          <button type="button" className="left-expand" onClick={toggleLeft} title="展开模型面板">
-            <PanelLeftOpen size={15} />
-            <span>模型面板</span>
-          </button>
-        ) : (
-          <ModelPanel />
-        )}
-        <ViewportStage onRun={runFromStage} onOpenAnalysis={openAnalysis} />
+        <ToolRail />
+        {!leftCollapsed && <ModelPanel />}
+        <ViewportStage onRun={runFromStage} />
         <CopilotPanel onSend={(prompt) => void sendAgentPrompt(prompt)} />
       </div>
       <Toasts />

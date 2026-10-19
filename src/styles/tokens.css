@@ -35,8 +35,8 @@
   --font-ui: 'Inter Variable', 'PingFang SC', 'Microsoft YaHei', 'Noto Sans SC', sans-serif;
   --font-display: 'Space Grotesk Variable', 'Inter Variable', 'PingFang SC', sans-serif;
   --font-mono: 'JetBrains Mono Variable', 'SFMono-Regular', Consolas, monospace;
-  --topbar-h: 58px;
-  --rail-w: 56px;
-  --model-w: 292px;
-  --copilot-w: 356px;
+  --topbar-h: 64px;
+  --rail-w: 72px;
+  --model-w: 320px;
+  --copilot-w: 390px;
 }

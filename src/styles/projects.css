@@ -91,7 +91,7 @@
 
 .project-pane-hint {
   font-family: var(--font-mono);
-  font-size: 6.5px;
+  font-size: 14px;
   color: var(--muted-2);
 }
 
@@ -139,21 +139,21 @@
 
 .project-card__code {
   font-family: var(--font-mono);
-  font-size: 7.5px;
+  font-size: 14px;
   letter-spacing: 0.06em;
   color: var(--muted);
 }
 
 .project-card__revision {
   font-family: var(--font-mono);
-  font-size: 7px;
+  font-size: 14px;
   color: var(--muted-2);
 }
 
 .project-card__name {
   display: block;
   margin-top: 4px;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--ink-soft);
 }
@@ -164,7 +164,7 @@
   gap: 8px;
   margin-top: 5px;
   font-family: var(--font-mono);
-  font-size: 7px;
+  font-size: 14px;
   color: var(--muted);
 }
 
@@ -182,7 +182,7 @@
   padding-top: 5px;
   border-top: 1px dashed var(--line-soft);
   font-family: var(--font-mono);
-  font-size: 6.5px;
+  font-size: 14px;
   color: var(--muted-2);
 }
 
@@ -203,7 +203,7 @@
 .project-import-row .button {
   flex: 1;
   padding: 0 7px;
-  font-size: 9.5px;
+  font-size: 14px;
 }
 
 .project-import-error {
@@ -212,7 +212,7 @@
   border-radius: 3px;
   background: var(--bad-soft);
   color: var(--bad);
-  font-size: 8px;
+  font-size: 14px;
   line-height: 1.4;
 }
 
@@ -252,7 +252,7 @@
   border: 1px solid var(--line);
   border-radius: 2px;
   font-family: var(--font-mono);
-  font-size: 6.5px;
+  font-size: 14px;
   color: var(--muted);
 }
 
@@ -261,7 +261,7 @@
   border: 1px solid var(--line);
   border-radius: 3px;
   font-family: var(--font-mono);
-  font-size: 6.5px;
+  font-size: 14px;
   letter-spacing: 0.04em;
   color: var(--muted);
 }
@@ -281,7 +281,7 @@
 
 .project-intent p {
   margin-top: 4px;
-  font-size: 10px;
+  font-size: 14px;
   line-height: 1.55;
   color: var(--ink-soft);
 }
@@ -293,7 +293,7 @@
   padding-top: 6px;
   border-top: 1px dashed var(--line);
   font-family: var(--font-mono);
-  font-size: 6.5px;
+  font-size: 14px;
   color: var(--muted);
 }
 
@@ -316,13 +316,13 @@
 }
 
 .project-meta-grid span {
-  font-size: 7px;
+  font-size: 14px;
   color: var(--muted);
 }
 
 .project-meta-grid b {
   font-family: var(--font-mono);
-  font-size: 9px;
+  font-size: 14px;
   font-weight: 500;
   color: var(--ink-soft);
 }
@@ -347,20 +347,20 @@
 }
 
 .project-rename label > span {
-  font-size: 8px;
+  font-size: 14px;
   color: var(--muted);
 }
 
 .project-rename .input {
   width: 132px;
   height: 27px;
-  font-size: 9px;
+  font-size: 14px;
 }
 
 .project-rename .button {
   height: 27px;
   margin-top: 7px;
-  font-size: 9px;
+  font-size: 14px;
 }
 
 .project-actions {
@@ -371,7 +371,7 @@
 
 .project-actions .button {
   height: 31px;
-  font-size: 9.5px;
+  font-size: 14px;
 }
 
 .button--danger {
@@ -410,13 +410,13 @@
 }
 
 .project-create__head b {
-  font-size: 10px;
+  font-size: 14px;
   font-weight: 600;
 }
 
 .project-create p {
   margin-top: 5px;
-  font-size: 8.5px;
+  font-size: 14px;
   line-height: 1.45;
   color: var(--muted);
 }
@@ -431,12 +431,12 @@
   height: 29px;
   min-width: 0;
   flex: 1;
-  font-size: 9px;
+  font-size: 14px;
 }
 
 .project-create__form .button {
   height: 29px;
-  font-size: 9px;
+  font-size: 14px;
 }
 
 .project-modal__footer {
@@ -449,7 +449,7 @@
   border-top: 1px solid var(--line);
   background: #f1efe7;
   font-family: var(--font-mono);
-  font-size: 6.5px;
+  font-size: 14px;
   color: var(--muted);
 }
 

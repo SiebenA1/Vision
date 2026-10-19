@@ -1,17 +1,16 @@
-import { AlertTriangle, Check, Crosshair, Move3d, Sparkles } from 'lucide-react';
+import { AlertTriangle } from 'lucide-react';
 import { SceneViewport } from './SceneViewport';
 import { ResultStrip } from './ResultStrip';
 import { useAppStore } from '../state/store';
 import { getMaterial } from '../core/materials';
 import { fieldMeta, rampCss } from '../core/fea/fieldProjection';
-import { fmt, vectorLabel } from '../lib/format';
+import { fmt } from '../lib/format';
 
 interface ViewportStageProps {
   onRun: () => void;
-  onOpenAnalysis: () => void;
 }
 
-export function ViewportStage({ onRun, onOpenAnalysis }: ViewportStageProps) {
+export function ViewportStage({ onRun }: ViewportStageProps) {
   const geometry = useAppStore((state) => state.geometry);
   const building = useAppStore((state) => state.building);
   const error = useAppStore((state) => state.geometryError);
@@ -44,7 +43,7 @@ export function ViewportStage({ onRun, onOpenAnalysis }: ViewportStageProps) {
           geometry={geometry}
           model={model}
           material={material}
-          analysis={analysis}
+          analysis={resultStale ? null : analysis}
           viewMode={viewMode}
           field={field}
           deformationScale={deformationScale}
@@ -54,75 +53,7 @@ export function ViewportStage({ onRun, onOpenAnalysis }: ViewportStageProps) {
           onToggleAnnotations={toggleAnnotations}
         />
 
-        <div className="stage-overlay stage-overlay--top-left">
-          <div className="stage-title">
-            <span className="eyebrow">{model.code} / STRUCTURAL STATIC</span>
-            <h1>{model.name}</h1>
-            <div className="stage-title__meta">
-              <span>{model.materialId}</span>
-              <span>
-                {model.loads[0]?.magnitude} N · {vectorLabel(model.loads[0]?.vector ?? [0, 0, -1])}
-              </span>
-              <span>{model.revision}</span>
-            </div>
-          </div>
-        </div>
-
-        <div className="stage-overlay stage-overlay--top-right">
-          <div className={`calc-badge ${analysis && !resultStale ? 'calc-badge--ready' : ''}`}>
-            <span className="calc-badge__icon">
-              {analysis && !resultStale ? <Check size={13} /> : <Sparkles size={13} />}
-            </span>
-            <div>
-              <b>
-                {analysis && !resultStale
-                  ? `SF ${fmt(analysis.safetyFactor, 2)}`
-                  : blank
-                    ? 'BLANK PROJECT'
-                    : 'SOLVER READY'}
-              </b>
-              <small>
-                {analysis && !resultStale
-                  ? 'LINEAR STATIC · CONVERGED'
-                  : blank
-                    ? 'ADD A BASE SOLID'
-                    : 'TETGEN + SFEPY'}
-              </small>
-            </div>
-          </div>
-          <div className="dimension-chip">
-            <Crosshair size={13} />
-            <span>
-              {geometry
-                ? `${fmt(geometry.bbox.max[0] - geometry.bbox.min[0], 0)} × ${fmt(
-                    geometry.bbox.max[1] - geometry.bbox.min[1],
-                    0,
-                  )} × ${fmt(geometry.bbox.max[2] - geometry.bbox.min[2], 0)} mm`
-                : '— × — × — mm'}
-            </span>
-          </div>
-        </div>
-
-        <div className="stage-overlay stage-overlay--bottom-left">
-          <div className="scene-legend">
-            <div className="scene-legend__row">
-              <span className="scene-legend__key scene-legend__key--fixed" /> FIXED
-              <span className="scene-legend__key scene-legend__key--load" /> LOAD
-              <span className="scene-legend__key scene-legend__key--hot" /> CRITICAL
-            </div>
-            <div className="scene-legend__meta">
-              <span className="mono">{geometry ? 'WATERTIGHT' : 'NO GEOMETRY'}</span>
-              <span>{analysis ? `h ${fmt(analysis.mesh.cellSize, 2)} mm` : geometry ? 'MESH PENDING' : 'AWAITING SOLID'}</span>
-              <span>{analysis ? `${analysis.mesh.elements.toLocaleString('en-US')} EL` : geometry ? 'MESH PENDING' : '—'}</span>
-            </div>
-          </div>
-          <div className="axis-hint">
-            <Move3d size={13} />
-            <span>Z-UP · mm</span>
-          </div>
-        </div>
-
-        {viewMode === 'result' && analysis && meta && (
+        {viewMode === 'result' && analysis && !resultStale && meta && (
           <div className="field-legend">
             <div className="field-legend__head">
               <div>
@@ -153,7 +84,7 @@ export function ViewportStage({ onRun, onOpenAnalysis }: ViewportStageProps) {
               </span>
             </div>
             <div className="field-legend__note">
-              {resultStale ? '结果对应旧几何版本 · 请重新求解' : 'TetGen 四面体 · SfePy 节点插值'}
+              {resultStale ? '结果对应旧几何或工况 · 请重新求解' : 'TetGen 四面体 · scikit-fem 节点插值'}
             </div>
           </div>
         )}
@@ -162,8 +93,8 @@ export function ViewportStage({ onRun, onOpenAnalysis }: ViewportStageProps) {
           <div className="rebuild-toast">
             <span className="rebuild-toast__spinner" />
             <div>
-              <b>REBUILDING GEOMETRY</b>
-              <span>Manifold boolean solve · watertight check</span>
+              <b>正在更新几何</b>
+              <span>请稍候…</span>
             </div>
           </div>
         )}
@@ -171,10 +102,10 @@ export function ViewportStage({ onRun, onOpenAnalysis }: ViewportStageProps) {
         {!geometry && !building && !error && (
           <div className={`stage-empty ${blank ? 'stage-empty--blank' : ''}`}>
             <div className="stage-empty__mark">V</div>
-            <b>{blank ? '空白工程' : '几何体未载入'}</b>
+            <b>{blank ? '开始你的设计' : '几何体未载入'}</b>
             <span>
               {blank
-                ? '在 ATLAS 中用 NVIDIA USD BRep 描述零件，内核会生成精确 B-Rep。'
+                ? '在右侧描述零件和尺寸，即可开始建模。'
                 : '运行重建以初始化参数化特征图。'}
             </span>
           </div>
@@ -190,7 +121,7 @@ export function ViewportStage({ onRun, onOpenAnalysis }: ViewportStageProps) {
           </div>
         )}
       </div>
-      <ResultStrip onRun={onRun} onOpenAnalysis={onOpenAnalysis} />
+      <ResultStrip onRun={onRun} />
     </main>
   );
 }

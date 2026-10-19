@@ -3,9 +3,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { CSS2DObject, CSS2DRenderer } from 'three/addons/renderers/CSS2DRenderer.js';
 import { toCreasedNormals } from 'three/addons/utils/BufferGeometryUtils.js';
-import { Box, Crosshair, Eye, EyeOff, Maximize2, Scan, Tag } from 'lucide-react';
+import { Maximize2 } from 'lucide-react';
 import type { AnalysisResult, FieldKind, GeometryData, ModelDocument } from '../core/types';
 import type { MaterialSpec } from '../core/materials';
+import type { RegionSelection } from '../core/cad/types';
 import { projectField } from '../core/fea/fieldProjection';
 
 type CameraPreset = 'iso' | 'front' | 'top' | 'side';
@@ -62,6 +63,21 @@ function makeLabel(className: string, html: string, position: THREE.Vector3): CS
   const label = new CSS2DObject(element);
   label.position.copy(position);
   return label;
+}
+
+function regionCenter(model: ModelDocument, region?: RegionSelection): THREE.Vector3 | null {
+  if (!region) return null;
+  if (region.type === 'sphere') return new THREE.Vector3(...region.center);
+  const bounds = region.type === 'box' ? [region] :
+    region.artifactId === model.cad?.artifactId ? model.cad.bodies.flatMap(body =>
+      body.faces.filter(face => region.faceIds.includes(face.id)).map(face => face.bbox_mm)) : [];
+  if (!bounds.length) return null;
+  const box = new THREE.Box3();
+  for (const bound of bounds) {
+    box.expandByPoint(new THREE.Vector3(...bound.min));
+    box.expandByPoint(new THREE.Vector3(...bound.max));
+  }
+  return box.getCenter(new THREE.Vector3());
 }
 
 function makeSupportPlane(bbox: GeometryData['bbox'], face: string): THREE.Group {
@@ -176,7 +192,7 @@ function loadFaceCenter(geometry: GeometryData, face: string): THREE.Vector3 {
 }
 
 export function SceneViewport({
-  geometry,
+  geometry: sourceGeometry,
   model,
   material,
   analysis,
@@ -190,6 +206,7 @@ export function SceneViewport({
   onToggleEdges,
   onToggleAnnotations,
 }: SceneViewportProps) {
+  const geometry = viewMode === 'result' && analysis?.surfaceGeometry ? analysis.surfaceGeometry : sourceGeometry;
   const containerRef = useRef<HTMLDivElement>(null);
   const contextRef = useRef<SceneContext | null>(null);
   const [cameraPreset, setCameraPreset] = useState<CameraPreset>('iso');
@@ -523,11 +540,10 @@ export function SceneViewport({
     if (!geometry) return;
     if (!showAnnotations) return;
 
-    const support = model.supports[0];
-    if (support) {
-      const supportGroup = makeSupportPlane(geometry.bbox, support.face);
-      context.annotationGroup.add(supportGroup);
-      const center = loadFaceCenter(geometry, support.face);
+    for (const support of model.supports.filter(item => item.enabled)) {
+      const center = regionCenter(model, support.region) ?? loadFaceCenter(geometry, support.face);
+      if (support.region?.type === 'cad-face' && support.region.artifactId !== model.cad?.artifactId) continue;
+      if (!support.region) context.annotationGroup.add(makeSupportPlane(geometry.bbox, support.face));
       const offset = new THREE.Vector3(
         support.face.endsWith('min') ? -7 : support.face.endsWith('max') ? 7 : 0,
         support.face.startsWith('y') ? (support.face.endsWith('min') ? -7 : 7) : 0,
@@ -535,8 +551,8 @@ export function SceneViewport({
       );
       const label = makeLabel(
         'scene-label--fixed',
-        '<span class="scene-label__dot"></span><span><b>FIXED</b><small>6 DOF · ' +
-          (support.face === 'x-min' ? '背板' : support.face) +
+          '<span class="scene-label__dot"></span><span><b>FIXED</b><small>3 DOF · ' +
+            (support.region?.type ?? support.face) +
           '</small></span>',
         center.clone().add(offset),
       );
@@ -544,9 +560,9 @@ export function SceneViewport({
       context.labels.push(label);
     }
 
-    const load = model.loads[0];
-    if (load) {
-      const center = loadFaceCenter(geometry, load.face);
+    for (const load of model.loads.filter(item => item.enabled)) {
+      if (load.region?.type === 'cad-face' && load.region.artifactId !== model.cad?.artifactId) continue;
+      const center = regionCenter(model, load.region) ?? loadFaceCenter(geometry, load.face);
       const dir = new THREE.Vector3(load.vector[0], load.vector[1], load.vector[2]).normalize();
       const faceNormal =
         load.face === 'x-min'
@@ -565,11 +581,11 @@ export function SceneViewport({
         geometry.bbox.max[1] - geometry.bbox.min[1],
         geometry.bbox.max[2] - geometry.bbox.min[2],
       );
-      const spread = Math.min(26, span * 0.22);
+      const spread = load.region ? 0 : Math.min(26, span * 0.22);
       const lateral = new THREE.Vector3().crossVectors(dir, new THREE.Vector3(0, 0, 1));
       if (lateral.lengthSq() < 0.01) lateral.set(0, 1, 0);
       lateral.normalize();
-      for (const factor of [-1, 0, 1]) {
+      for (const factor of load.region ? [0] : [-1, 0, 1]) {
         const origin = center
           .clone()
           .add(offset)
@@ -593,7 +609,7 @@ export function SceneViewport({
       }
       const label = makeLabel(
         'scene-label--load',
-        `<span class="scene-label__glyph">↓</span><span><b>${load.magnitude.toFixed(0)} N</b><small>LOAD · ${load.face}</small></span>`,
+        `<span class="scene-label__glyph">↓</span><span><b>${load.magnitude.toFixed(0)} N</b><small>LOAD · ${load.region?.type ?? load.face}</small></span>`,
         center.clone().add(offset).addScaledVector(dir, -6).addScaledVector(lateral, spread + 18),
       );
       context.annotationGroup.add(label);
@@ -631,47 +647,17 @@ export function SceneViewport({
   return (
     <div className="scene-viewport" ref={containerRef}>
       <div className="scene-vignette" />
-      <div className="view-toolbar" role="toolbar" aria-label="视图控制">
-        <button
-          type="button"
-          className={cameraPreset === 'iso' ? 'is-active' : ''}
-          onClick={() => fitCamera('iso')}
-          title="等轴测视图"
-        >
-          <Box size={15} />
-        </button>
-        <button
-          type="button"
-          className={cameraPreset === 'front' ? 'is-active' : ''}
-          onClick={() => fitCamera('front')}
-          title="前视图"
-        >
-          <Scan size={15} />
-        </button>
-        <button
-          type="button"
-          className={cameraPreset === 'top' ? 'is-active' : ''}
-          onClick={() => fitCamera('top')}
-          title="顶视图"
-        >
-          <Crosshair size={15} />
-        </button>
-        <span className="view-toolbar__divider" />
-        <button type="button" onClick={() => fitCamera(cameraPreset)} title="适配视图">
-          <Maximize2 size={15} />
-        </button>
-        <button type="button" className={showEdges ? 'is-active' : ''} onClick={onToggleEdges} title="边线">
-          {showEdges ? <Eye size={15} /> : <EyeOff size={15} />}
-        </button>
-        <button
-          type="button"
-          className={showAnnotations ? 'is-active' : ''}
-          onClick={onToggleAnnotations}
-          title="边界条件标注"
-        >
-          <Tag size={15} />
-        </button>
-      </div>
+      {geometry && <div className="view-toolbar" role="toolbar" aria-label="视图控制">
+        <button type="button" onClick={() => fitCamera(cameraPreset)} title="适配视图" aria-label="适配视图"><Maximize2 size={18} /></button>
+        <details className="view-options"><summary>视图设置</summary><div className="view-options__body">
+          <label>观察方向<select className="select" value={cameraPreset} onChange={(event) => fitCamera(event.target.value as CameraPreset)}>
+            <option value="iso">等轴测</option><option value="front">前视图</option><option value="top">顶视图</option><option value="side">侧视图</option>
+          </select></label>
+          <label><input type="checkbox" checked={showEdges} onChange={onToggleEdges} />显示边线</label>
+          <label><input type="checkbox" checked={showAnnotations} onChange={onToggleAnnotations} />显示载荷与约束</label>
+        </div></details>
+      </div>}
+
     </div>
   );
 }

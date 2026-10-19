@@ -4,11 +4,8 @@ import {
   Cpu,
   Download,
   FileText,
-  FolderKanban,
   GitBranch,
   MoreHorizontal,
-  PanelLeftClose,
-  PanelLeftOpen,
   Play,
   Redo2,
   RotateCcw,
@@ -36,7 +33,6 @@ function Wordmark() {
       </svg>
       <div className="wordmark__type">
         <span>VISION</span>
-        <small>ENGINEERING INTELLIGENCE</small>
       </div>
     </div>
   );
@@ -55,9 +51,7 @@ export function TopBar({
   const history = useAppStore((state) => state.history);
   const future = useAppStore((state) => state.future);
   const analysisStatus = useAppStore((state) => state.analysisStatus);
-  const resultStale = useAppStore((state) => state.resultStale);
-  const leftCollapsed = useAppStore((state) => state.leftCollapsed);
-  const toggleLeft = useAppStore((state) => state.toggleLeft);
+  const geometry = useAppStore((state) => state.geometry);
   const undo = useAppStore((state) => state.undo);
   const redo = useAppStore((state) => state.redo);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -69,8 +63,13 @@ export function TopBar({
     const close = (event: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(event.target as Node)) setMenuOpen(false);
     };
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') setMenuOpen(false); };
     window.addEventListener('mousedown', close);
-    return () => window.removeEventListener('mousedown', close);
+    window.addEventListener('keydown', closeOnEscape);
+    return () => {
+      window.removeEventListener('mousedown', close);
+      window.removeEventListener('keydown', closeOnEscape);
+    };
   }, [menuOpen]);
 
   return (
@@ -78,17 +77,7 @@ export function TopBar({
       <div className="topbar__brand">
         <Wordmark />
         <div className="topbar__divider" />
-        <button
-          type="button"
-          className={`icon-button topbar__panel-toggle ${leftCollapsed ? 'is-collapsed' : ''}`}
-          onClick={toggleLeft}
-          title={leftCollapsed ? '展开模型面板' : '收起模型面板'}
-          aria-label={leftCollapsed ? '展开模型面板' : '收起模型面板'}
-        >
-          {leftCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
-        </button>
         <div className="project-crumb">
-          <span className="eyebrow">PROJECT</span>
           <button
             type="button"
             className="project-crumb__title"
@@ -102,22 +91,8 @@ export function TopBar({
         </div>
       </div>
 
-      <nav className="topbar__nav" aria-label="工作区">
-        <button type="button" className="nav-tab is-active">
-          模型与验证
-        </button>
-        <button type="button" className="nav-tab" onClick={onOpenAnalysis}>
-          分析工作台
-          {resultStale && <span className="nav-tab__flag">STALE</span>}
-        </button>
-      </nav>
-
       <div className="topbar__actions">
-        <div className={`engine-status ${busy ? 'engine-status--busy' : ''}`}>
-          <span className="engine-status__dot" />
-          <span>{busy ? 'SOLVER ACTIVE' : 'LOCAL ENGINE'}</span>
-        </div>
-        <div className="history-controls">
+        {(history.length > 0 || future.length > 0) && <div className="history-controls">
           <button
             type="button"
             className="icon-button"
@@ -136,8 +111,9 @@ export function TopBar({
           >
             <Redo2 size={16} />
           </button>
-        </div>
-        <button type="button" className="button button--primary topbar__run" onClick={onRunAnalysis}>
+        </div>}
+        <button type="button" className="button" onClick={onOpenAnalysis} disabled={!geometry}>分析详情</button>
+        <button type="button" className="button button--primary topbar__run" onClick={onRunAnalysis} disabled={!geometry || busy} title={!geometry ? '先在 ATLAS 中描述零件，生成几何后即可分析' : '运行当前工况'}>
           <Play size={14} fill="currentColor" />
           {busy ? '求解中' : '运行分析'}
         </button>
@@ -154,12 +130,6 @@ export function TopBar({
           {menuOpen && (
             <div className="dropdown-menu">
               <div className="dropdown-menu__label">PROJECT</div>
-              <button type="button" onClick={() => { setMenuOpen(false); onOpenProjects(); }}>
-                <FolderKanban size={14} /> 工程中心
-              </button>
-              <button type="button" onClick={() => { setMenuOpen(false); onOpenAnalysis(); }}>
-                <Play size={14} /> 打开分析工作台
-              </button>
               <button type="button" onClick={() => { setMenuOpen(false); onOpenLlmSettings(); }}>
                 <Cpu size={14} /> DeepSeek 设置
               </button>
@@ -174,14 +144,12 @@ export function TopBar({
                 <GitBranch size={12} /> {model.revision} · schema {model.schema.split('/')[1]}
               </div>
               <button type="button" onClick={() => { setMenuOpen(false); onReset(); }}>
-                <RotateCcw size={14} /> 重置示例项目
+                <RotateCcw size={14} /> 重置为空白工程
               </button>
             </div>
           )}
         </div>
-        <button type="button" className="avatar" title="Jarvi · 设计负责人">
-          JV
-        </button>
+
       </div>
     </header>
   );
