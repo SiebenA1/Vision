@@ -1,5 +1,20 @@
 import { defineConfig, loadEnv, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
+import { startDevelopmentBackend } from './scripts/developmentBackend.js';
+
+function engineeringBackendPlugin(target: string, managed: boolean): Plugin {
+  const start = async (server: { httpServer: NonNullable<import('vite').ViteDevServer['httpServer']>; config: { root: string; logger: { info: (message: string) => void } } }) => {
+    if (!managed) return;
+    const stop = await startDevelopmentBackend(target, server.config.root);
+    server.httpServer.once('close', stop);
+    server.config.logger.info(`Engineering backend ready: ${target}`);
+  };
+  return {
+    name: 'vision-engineering-backend',
+    async configureServer(server) { if (server.httpServer) await start({ ...server, httpServer: server.httpServer }); },
+    async configurePreviewServer(server) { await start(server); },
+  };
+}
 
 interface GatewayConfig {
   hasServerKey: boolean;
@@ -35,6 +50,8 @@ function deepseekStatusPlugin(config: GatewayConfig): Plugin {
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
+  const externalBackend = process.env.VISION_ENGINEERING_URL || env.VISION_ENGINEERING_URL;
+  const engineeringTarget = externalBackend || `http://127.0.0.1:${process.env.VISION_ENGINEERING_PORT || env.VISION_ENGINEERING_PORT || '8111'}`;
   const apiKey = process.env.DEEPSEEK_API_KEY || env.DEEPSEEK_API_KEY || '';
   const target = (process.env.DEEPSEEK_API_BASE || env.DEEPSEEK_API_BASE || 'https://api.deepseek.com').replace(
     /\/$/,
@@ -43,11 +60,19 @@ export default defineConfig(({ mode }) => {
 
   const proxy = {
     '/api/engineering': {
-      target: process.env.VISION_ENGINEERING_URL || 'http://127.0.0.1:8111',
+      target: engineeringTarget,
       changeOrigin: false,
-      timeout: 300_000,
-      proxyTimeout: 300_000,
+      // Outlast the 600s solve budget and optional native geometry preflight.
+      timeout: 900_000,
+      proxyTimeout: 900_000,
       rewrite: (path: string) => path.replace(/^\/api\/engineering/, ''),
+      configure: (proxyServer: any) => {
+        proxyServer.on('error', (_error: Error, _request: unknown, response: import('node:http').ServerResponse) => {
+          if (response.headersSent || response.writableEnded || typeof response.writeHead !== 'function') return;
+          response.writeHead(503, { 'Content-Type': 'application/json; charset=utf-8' });
+          response.end(JSON.stringify({ error: `计算后端不可用（${engineeringTarget}）。请检查后端进程，或重启 npm run dev 自动启动本地后端。`, code: 'ENGINEERING_BACKEND_UNAVAILABLE' }));
+        });
+      },
     },
     '/api/deepseek': {
       target,
@@ -75,15 +100,17 @@ export default defineConfig(({ mode }) => {
   };
 
   return {
-    plugins: [react(), deepseekStatusPlugin({ hasServerKey: Boolean(apiKey), target })],
+    plugins: [react(), engineeringBackendPlugin(engineeringTarget, !externalBackend), deepseekStatusPlugin({ hasServerKey: Boolean(apiKey), target })],
     server: {
       host: '127.0.0.1',
       port: 4173,
+      strictPort: true,
       proxy,
     },
     preview: {
       host: '127.0.0.1',
       port: 4173,
+      strictPort: true,
       proxy,
     },
     build: {

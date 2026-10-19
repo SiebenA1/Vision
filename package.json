@@ -11,7 +11,9 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "backend": "python server/engineering_server.py"
+    "test:native-ui": "node scripts/native-ui-test.mjs",
+    "test:backend": "node scripts/test_dev_backend.mjs",
+    "backend": "python scripts/run_backend.py"
   },
   "engines": {
     "node": ">=20.19"
@@ -21,7 +23,6 @@
     "@fontsource-variable/jetbrains-mono": "^5.2.8",
     "@fontsource-variable/space-grotesk": "^5.2.9",
     "lucide-react": "^0.468.0",
-    "manifold-3d": "^3.5.4",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "three": "^0.180.0",
