@@ -1,7 +1,5 @@
-﻿# HTTP/FEA runtime (CPython 3.13)
-gmsh==4.15.2
+# Portable Windows/Linux linear-static backend. USD BRep has its own CPython 3.12.
 tetgen==0.8.4
-sfepy>=2026.3
-meshio
-numpy
-scipy
+scikit-fem==12.0.2
+numpy==2.2.6
+scipy==1.15.3

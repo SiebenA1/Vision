@@ -1,7 +1,7 @@
-"""Generic Gmsh + SfePy linear-elastic solve for build123d/OCCT geometry.
+"""Generic TetGen + scikit-fem linear-elastic solve for USD BRep STL geometry.
 
 This module is intentionally a solver backend, not a model library. Geometry is
-supplied by a caller-provided build123d script; boundary conditions are selected
+supplied by a caller-provided USD BRep script; boundary conditions are selected
 from the model's face ids (x-min, x-max, ...).
 """
 from __future__ import annotations
@@ -12,6 +12,7 @@ import os
 import subprocess
 import sys
 import uuid
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -24,11 +25,17 @@ if os.name == "nt":
             if str(candidate) not in sys.path:
                 sys.path.insert(0, str(candidate))
 
-import gmsh
-import meshio
+from fea_contract import validate_study
 import numpy as nm
 
 WORK_ROOT = Path(__file__).resolve().parent / ".fea_runs"
+SOLVE_TIMEOUT_SECONDS = 600
+_SOLVE_SLOT = threading.BoundedSemaphore(1)
+
+
+class FeaBusyError(RuntimeError):
+    status_code = 503
+    code = "FEA_BUSY"
 
 
 def _face_axis(face: str, bbox: list[float]) -> tuple[int, float, int, float]:
@@ -94,8 +101,7 @@ def _clean_stl(source: Path, target: Path) -> dict[str, int]:
         raise ValueError("STL is empty or truncated")
     count = struct.unpack_from("<I", data, 80)[0]
     if 84 + count * 50 != len(data):
-        target.write_bytes(data)
-        return {"triangles": count, "removed": 0}
+        raise ValueError("expected an exact-length binary STL")
     coords = []
     for index in range(count):
         offset = 84 + index * 50 + 12
@@ -145,6 +151,7 @@ def _clean_stl(source: Path, target: Path) -> dict[str, int]:
             edge = (u, v) if u < v else (v, u)
             edge_counts[edge] = edge_counts.get(edge, 0) + 1
     non_manifold = [edge for edge, count in edge_counts.items() if count > 2]
+    open_edges = sum(count == 1 for count in edge_counts.values())
     max_incidence = max(edge_counts.values(), default=0)
 
     payload = bytearray(b"VISION cleaned STL".ljust(80, b" "))
@@ -164,6 +171,7 @@ def _clean_stl(source: Path, target: Path) -> dict[str, int]:
     return {
         "triangles": len(triangles),
         "removed": removed,
+        "openEdges": open_edges,
         "nonManifoldEdges": len(non_manifold),
         "maxEdgeIncidence": max_incidence,
         "firstNonManifoldEdge": (
@@ -174,7 +182,7 @@ def _clean_stl(source: Path, target: Path) -> dict[str, int]:
     }
 
 
-def _mesh_from_stl(stl_path: Path, mesh_path: Path, mesh_size: float) -> dict[str, Any]:
+def _mesh_from_stl(stl_path: Path, mesh_path: Path, mesh_size: float, holes=None) -> dict[str, Any]:
     """Tetrahedralize a cleaned STL with TetGen.
 
     Gmsh's STL surface reparametrization rejects some valid NURBS tessellations
@@ -208,10 +216,12 @@ def _mesh_from_stl(stl_path: Path, mesh_path: Path, mesh_size: float) -> dict[st
     lo = vertices.min(axis=0)
     hi = vertices.max(axis=0)
     diag = float(nm.linalg.norm(hi - lo))
-    h = max(mesh_size, diag / 140.0)
+    h = mesh_size
     gen = tetgen.TetGen(vertices, triangles)
+    for point in holes or []:
+        gen.add_hole(point)
     nodes, tets, _, _ = gen.tetrahedralize(
-        switches=f"pq1.8a{max(0.01, h**3):.6f}",
+        switches=f"pq1.8a{h**3:.12g}",
         quality=True,
         steinerleft=200000,
         quiet=True,
@@ -220,6 +230,14 @@ def _mesh_from_stl(stl_path: Path, mesh_path: Path, mesh_size: float) -> dict[st
     tets = nm.asarray(tets, dtype=nm.int64)
     if tets.size == 0:
         raise ValueError("TetGen produced no tetrahedra")
+    corners = nodes[tets]
+    determinants = nm.einsum('ij,ij->i', corners[:, 1] - corners[:, 0], nm.cross(corners[:, 2] - corners[:, 0], corners[:, 3] - corners[:, 0]))
+    if not nm.isfinite(determinants).all() or nm.any(nm.abs(determinants) < 1e-16):
+        raise ValueError("TetGen produced a degenerate or non-finite tetrahedron")
+    negative = determinants < 0
+    tets[negative, :2] = tets[negative, 1::-1]
+    if len(tets) > 1_000_000:
+        raise ValueError("mesh exceeds the local one-million-element limit; use a coarser requested size")
     # Extract boundary triangles from tet faces occurring exactly once.
     face_owner: dict[tuple[int, int, int], list[tuple[int, int, int]]] = {}
     for tet in tets:
@@ -310,15 +328,21 @@ def _solve_impl(
     supports: list[dict[str, Any]],
     loads: list[dict[str, Any]],
     mesh_size: float = 4.0,
+    holes=None, expected_volume=None,
 ) -> dict[str, Any]:
     import base64
 
+    active_supports, active_loads = validate_study(material, supports, loads, mesh_size)
+    import time
+    build_started = time.perf_counter()
     run_dir = WORK_ROOT / f"run_{uuid.uuid4().hex[:10]}"
     run_dir.mkdir(parents=True, exist_ok=True)
     stl_path = run_dir / "model.stl"
-    stl_path.write_bytes(base64.b64decode(stl_base64))
+    stl_path.write_bytes(base64.b64decode(stl_base64, validate=True))
     clean_path = run_dir / "model_clean.stl"
     cleanup = _clean_stl(stl_path, clean_path)
+    if cleanup["openEdges"]:
+        raise ValueError(f"STL has {cleanup['openEdges']} open edges; volume analysis requires closed solids")
     if cleanup["nonManifoldEdges"] > 0:
         edge = cleanup.get("firstNonManifoldEdge")
         raise ValueError(
@@ -329,77 +353,146 @@ def _solve_impl(
             "Union the touching bodies or regenerate the B-Rep so every edge has exactly 2 triangles."
         )
     mesh_path = run_dir / "model.mesh"
-    mesh = _mesh_from_stl(clean_path, mesh_path, max(0.5, mesh_size))
+    mesh = _mesh_from_stl(clean_path, mesh_path, mesh_size, holes)
+    mesh_ms = (time.perf_counter() - build_started) * 1000
     points = mesh["vertices"]
     tets = mesh["tets"]
     tris = mesh["tris"]
     bbox = mesh["bbox"]
 
-    support = next((item for item in supports if item.get("enabled", True)), None) or supports[0]
-    load = next((item for item in loads if item.get("enabled", True)), None) or loads[0]
-    fixed_face = str(support.get("face", "x-min"))
-    load_face = str(load.get("face", "x-max"))
-    fixed_desc = _face_condition(fixed_face, bbox, _face_axis(fixed_face, bbox)[3])
-    selected, area, load_band = _select_load_triangles(points, tris, load_face, bbox)
-    load_desc = _face_condition(load_face, bbox, load_band)
-    if area <= 0:
-        raise ValueError(f"load face {load_face} has no boundary area")
-    force = nm.asarray(load.get("vector", [0, 0, -1]), dtype=nm.float64)
-    force = force / max(1e-12, nm.linalg.norm(force)) * float(load.get("magnitude", 0))
-    traction = force / area
+    native_regions = [item["region"] for item in active_supports + active_loads if item.get("region", {}).get("type") == "cad-face"]
+    native_masks = {}
+    if native_regions:
+        import tempfile
+        import cad_artifacts
+        from engineering_server import run_cad_worker
+        for region in native_regions:
+            # Each selector carries its immutable artifact identity. The HTTP layer
+            # checks it matches the study's selected geometry before meshing.
+            with tempfile.TemporaryDirectory(prefix="select-", dir=WORK_ROOT) as temp:
+                selection = run_cad_worker({"operation": "select_faces", "source_usd": str(cad_artifacts.artifact_path(region["artifactId"]) / "model.usda"),
+                                            "source_breps": [str(cad_artifacts.artifact_path(region["artifactId"]) / f"body-{i}.brep") for i in range(len(json.loads(cad_artifacts.read_file(region["artifactId"], "manifest.json"))["bodies"]))],
+                                            "points": points.tolist(), "regions": [region]}, temp)
+            mask = nm.zeros(len(points), dtype=bool)
+            mask[selection["selections"][0]] = True
+            native_masks[json.dumps(region, sort_keys=True)] = mask
 
-    E = float(material.get("E", 68900.0))
-    nu = float(material.get("nu", 0.33))
-    config = run_dir / "problem.py"
-    config.write_text(
-        f"""from sfepy.mechanics.matcoefs import stiffness_from_youngpoisson
+    def region_nodes(item, load=False):
+        region = item.get("region")
+        if region:
+            if region["type"] == "cad-face":
+                mask = native_masks[json.dumps(region, sort_keys=True)]
+            elif region["type"] == "box":
+                mask = nm.all((points >= nm.asarray(region["min"])) & (points <= nm.asarray(region["max"])), axis=1)
+            else:
+                mask = nm.linalg.norm(points - nm.asarray(region["center"]), axis=1) <= region["radius"]
+        else:
+            axis, limit, sign, band = _face_axis(item["face"], bbox)
+            if load:
+                _, _, band = _select_load_triangles(points, tris, item["face"], bbox)
+            mask = sign * (points[:, axis] - limit) >= -band - 1e-8
+        # Select full boundary facets whose vertices all satisfy the region.
+        selected = tris[nm.all(mask[tris], axis=1)]
+        nodes = nm.unique(selected) if load else nm.flatnonzero(mask)
+        if not len(nodes) or (load and not len(selected)):
+            raise ValueError(f"empty boundary region: {item.get('name', item.get('face', 'custom'))}")
+        return nodes, selected
 
-filename_mesh = r"{mesh_path}"
-regions = {{
-    'Omega': 'all',
-    'Fixed': ('vertices in ({fixed_desc})', 'facet'),
-    'Load': ('vertices in ({load_desc})', 'facet'),
-}}
-materials = {{
-    'solid': ({{'D': stiffness_from_youngpoisson(3, {E}, {nu}),
-                'traction': [[{traction[0]}], [{traction[1]}], [{traction[2]}]]}},),
-}}
-fields = {{'u': ('real', 'vector', 'Omega', 1)}}
-variables = {{
-    'u': ('unknown field', 'u', 0),
-    'v': ('test field', 'u', 'u'),
-}}
-ebcs = {{'Fixed': ('Fixed', {{'u.all': 0.0}})}}
-equations = {{
-    'balance': 'dw_lin_elastic.2.Omega(solid.D, v, u) = dw_surface_ltr.2.Load(solid.traction, v)',
-}}
-solvers = {{
-    'ls': ('ls.auto_direct', {{}}),
-    'newton': ('nls.newton', {{'i_max': 1, 'eps_a': 1e-10}}),
-}}
-options = {{'output_dir': r"{run_dir}"}}
-""",
-        encoding="utf-8",
-    )
-    env = os.environ.copy()
-    env["PYTHONPATH"] = os.pathsep.join(sys.path)
-    proc = subprocess.run(
-        [sys.executable, "-m", "sfepy.scripts.simple", str(config), "--filename", "study"],
-        cwd=run_dir,
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=300,
-    )
-    if proc.returncode != 0:
-        raise RuntimeError(proc.stdout + "\n" + proc.stderr)
-    vtk_path = run_dir / "model.vtk"
-    vtk = meshio.read(vtk_path)
-    u = nm.asarray(vtk.point_data["u"], dtype=nm.float64)
-    vtk_points = nm.asarray(vtk.points, dtype=nm.float64)
-    vtk_tets = nm.asarray(
-        next(cell.data for cell in vtk.cells if cell.type == "tetra"), dtype=nm.int64
-    )
+    fixed_sets = [region_nodes(item)[0] for item in active_supports]
+    fixed_nodes = nm.unique(nm.concatenate(fixed_sets))
+    # Every disconnected component requires sufficient constraints; never silently bond parts.
+    from scipy.sparse import coo_matrix
+    from scipy.sparse.csgraph import connected_components
+    rows = nm.repeat(tets[:, 0], 3)
+    cols = tets[:, 1:].reshape(-1)
+    graph = coo_matrix((nm.ones(len(rows)), (rows, cols)), shape=(len(points), len(points)))
+    _, labels = connected_components(graph, directed=False)
+    for component in nm.unique(labels):
+        anchors = fixed_nodes[labels[fixed_nodes] == component]
+        if len(anchors) < 3 or nm.linalg.matrix_rank(points[anchors] - points[anchors[0]]) < 2:
+            raise ValueError("a mesh component has insufficient fixed nodes to restrain rigid-body motion")
+    nodal_forces = nm.zeros((len(points), 3))
+    boundary_evidence = []
+    applied = nm.zeros(3)
+    area = 0.0
+    for index, nodes in enumerate(fixed_sets):
+        key = f"Fixed{index}"
+        boundary_evidence.append({"kind": "support", "name": active_supports[index].get("name", key), "nodes": len(nodes)})
+    for index, load in enumerate(active_loads):
+        nodes, selected = region_nodes(load, load=True)
+        if nm.intersect1d(nodes, fixed_nodes).size:
+            raise ValueError("a load region overlaps fixed nodes; choose a separate physical loading surface")
+        selected_area = sum(_triangle_area(points, tri) for tri in selected)
+        if selected_area <= 0:
+            raise ValueError("load selection has zero area")
+        force = nm.asarray(load["vector"], dtype=float)
+        force = force / nm.linalg.norm(force) * load["magnitude"]
+        applied += force
+        area += selected_area
+        for tri in selected:
+            nodal_forces[tri] += force * (_triangle_area(points, tri) / selected_area / 3)
+        boundary_evidence.append({"kind": "load", "name": load.get("name", f"Load{index}"), "nodes": len(nodes),
+                                  "facets": len(selected), "areaMm2": selected_area, "force": force.tolist()})
+    E, nu = float(material["E"]), float(material["nu"])
+    import time
+    from skfem import MeshTet, Basis, ElementTetP1, ElementVector, asm, condense, solve as solve_linear
+    from skfem.models.elasticity import linear_elasticity, lame_parameters
+    solve_started = time.perf_counter()
+    tetra_mesh = MeshTet(points.T, tets.T, sort_t=False)
+    # P1 tetrahedral strain is constant: one quadrature point integrates
+    # homogeneous linear elasticity exactly, without four copies of the fields.
+    basis = Basis(tetra_mesh, ElementVector(ElementTetP1()), intorder=1)
+    form = linear_elasticity(*lame_parameters(E, nu))
+    print(f"assembly: {len(tets)} elements, {basis.N} DOFs", flush=True)
+    stiffness = None
+    for start in range(0, len(tets), 32768):
+        chunk = asm(form, basis.with_elements(nm.arange(start, min(start + 32768, len(tets)))))
+        stiffness = chunk if stiffness is None else stiffness + chunk
+    rhs = nm.zeros(basis.N)
+    rhs[basis.nodal_dofs] = nodal_forces.T
+    fixed_dofs = basis.nodal_dofs[:, fixed_nodes].reshape(-1)
+    iterations = None
+    algorithm = "Direct"
+    preconditioner = "Direct"
+    if basis.N > 60000:
+        from scipy.sparse.linalg import cg, LinearOperator
+        reduced, reduced_rhs, displacement, free_dofs = condense(stiffness, rhs, D=fixed_dofs)
+        diagonal = reduced.diagonal()
+        if not nm.isfinite(diagonal).all() or nm.any(diagonal <= 0):
+            raise RuntimeError("invalid stiffness diagonal; inspect material, mesh and constraints")
+        inverse_diagonal = 1.0 / diagonal
+        conditioning = LinearOperator(reduced.shape, matvec=lambda vector: inverse_diagonal * vector, dtype=float)
+        iterations = 0
+        algorithm, preconditioner = "CG", "Jacobi"
+        print(f"solve: CG/Jacobi, {len(free_dofs)} free DOFs", flush=True)
+        def count_iteration(_solution):
+            nonlocal iterations
+            iterations += 1
+            if iterations % 250 == 0:
+                print(f"CG iteration {iterations}", flush=True)
+        solution, info = cg(reduced, reduced_rhs, M=conditioning, rtol=1e-8, atol=0.0,
+                            maxiter=10000, callback=count_iteration)
+        if info != 0:
+            raise RuntimeError(f"CG did not converge (status={info}, iterations={iterations}); inspect constraints, mesh quality and refinement size")
+        displacement[free_dofs] = solution
+        del reduced, reduced_rhs, conditioning, solution
+    else:
+        print("solve: sparse direct", flush=True)
+        displacement = solve_linear(*condense(stiffness, rhs, D=fixed_dofs))
+    if not nm.isfinite(displacement).all():
+        raise RuntimeError("the linear system returned a non-finite displacement; verify component constraints")
+    residual = stiffness @ displacement - rhs
+    free = nm.setdiff1d(nm.arange(basis.N), fixed_dofs)
+    relative_residual = float(nm.linalg.norm(residual[free]) / max(nm.linalg.norm(rhs), 1e-12))
+    if relative_residual > 1e-6:
+        raise RuntimeError(f"linear solve residual exceeds tolerance: {relative_residual}")
+    reaction = residual[basis.nodal_dofs[:, fixed_nodes]].sum(axis=1)
+    equilibrium_residual = reaction + applied
+    equilibrium_error = float(nm.linalg.norm(equilibrium_residual) / sum(load["magnitude"] for load in active_loads))
+    energy = float(0.5 * displacement @ (stiffness @ displacement))
+    solve_ms = (time.perf_counter() - solve_started) * 1000
+    u = displacement[basis.nodal_dofs].T
+    vtk_points, vtk_tets = points, tets
     _, von_mises, _ = _stress_from_displacement(vtk_points, vtk_tets, u, E, nu)
     disp_mag = nm.linalg.norm(u, axis=1)
     imax = int(nm.argmax(von_mises))
@@ -408,10 +501,35 @@ options = {{'output_dir': r"{run_dir}"}}
     for tet in tets:
         a, b, c, d = points[tet]
         volume += abs(float(nm.dot(b - a, nm.cross(c - a, d - a))) / 6.0)
+    if expected_volume and abs(volume - expected_volume) / expected_volume > 0.05:
+        raise ValueError("mesh volume differs from native CAD volume by more than 5%; inspect cavities, overlap and tessellation")
+    corners = points[tets]
+    jacobians = []
+    for corner in range(4):
+        other = [index for index in range(4) if index != corner]
+        edges = corners[:, other] - corners[:, corner, None, :]
+        determinant = nm.abs(nm.einsum('ij,ij->i', edges[:, 0], nm.cross(edges[:, 1], edges[:, 2])))
+        jacobians.append(nm.sqrt(2.0) * determinant / nm.prod(nm.linalg.norm(edges, axis=2), axis=1))
+    quality = {"minScaledJacobian": float(nm.min(jacobians)), "negativeElements": 0}
     yield_strength = float(material.get("yieldStrength", material.get("yield", 276.0)))
     max_vm = float(von_mises[imax])
     return {
         "schema": "vision.fea/1",
+        "appliedForce": applied.tolist(),
+        "boundaries": boundary_evidence,
+        "solveMs": solve_ms,
+        "solverMethod": "scikit-fem",
+        "solverAlgorithm": algorithm,
+        "preconditioner": preconditioner,
+        "iterations": iterations,
+        "meshMs": mesh_ms,
+        "quality": quality,
+        "relativeResidual": relative_residual,
+        "converged": True,
+        "strainEnergyMj": energy,
+        "reaction": reaction.tolist(),
+        "equilibriumResidual": equilibrium_residual.tolist(),
+        "equilibriumError": equilibrium_error,
         "nodes": int(len(vtk_points)),
         "elements": int(len(vtk_tets)),
         "dofs": int(len(vtk_points) * 3),
@@ -437,8 +555,10 @@ def solve(
     supports: list[dict[str, Any]],
     loads: list[dict[str, Any]],
     mesh_size: float = 4.0,
+    holes=None, expected_volume=None,
 ) -> dict[str, Any]:
-    """Run the solve in a child process (Gmsh requires the main thread)."""
+    """Run native meshing and solving in a child process."""
+    validate_study(material, supports, loads, mesh_size)
     WORK_ROOT.mkdir(parents=True, exist_ok=True)
     run = WORK_ROOT / f"request_{uuid.uuid4().hex[:10]}"
     run.mkdir(parents=True, exist_ok=True)
@@ -451,7 +571,7 @@ def solve(
                 "material": material,
                 "supports": supports,
                 "loads": loads,
-                "mesh_size": mesh_size,
+                "mesh_size": mesh_size, "holes": holes, "expected_volume": expected_volume,
             },
             ensure_ascii=False,
         ),
@@ -459,16 +579,28 @@ def solve(
     )
     env = os.environ.copy()
     env["PYTHONPATH"] = os.pathsep.join(sys.path)
-    proc = subprocess.run(
-        [sys.executable, str(Path(__file__).resolve()), str(request_path), str(output_path)],
-        cwd=str(run),
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=360,
-    )
+    if not _SOLVE_SLOT.acquire(blocking=False):
+        raise FeaBusyError("已有网格或求解任务运行中，请等待其结束后再提交；重复提交会增加内存压力。")
+    import time
+    started = time.perf_counter()
+    try:
+        with (run / "stdout.log").open("w", encoding="utf-8") as stdout, (run / "stderr.log").open("w", encoding="utf-8") as stderr:
+            proc = subprocess.run(
+                [sys.executable, str(Path(__file__).resolve()), str(request_path), str(output_path)],
+                cwd=str(run), env=env, stdout=stdout, stderr=stderr, text=True,
+                timeout=SOLVE_TIMEOUT_SECONDS,
+            )
+        (run / "execution.json").write_text(json.dumps({"returncode": proc.returncode,
+            "elapsedSeconds": time.perf_counter() - started}), encoding="utf-8")
+    except subprocess.TimeoutExpired as exc:
+        (run / "execution.json").write_text(json.dumps({"error": "FEA_TIMEOUT",
+            "elapsedSeconds": time.perf_counter() - started}), encoding="utf-8")
+        raise TimeoutError(f"本次计算超过 {SOLVE_TIMEOUT_SECONDS} 秒，求解进程已终止。请适当放粗网格或分区分析；诊断记录：{run.name}") from exc
+    finally:
+        _SOLVE_SLOT.release()
     if proc.returncode != 0:
-        raise RuntimeError((proc.stdout or "") + "\n" + (proc.stderr or ""))
+        error = (run / "stderr.log").read_text(encoding="utf-8", errors="replace")[-4000:]
+        raise RuntimeError(f"求解进程退出（代码 {proc.returncode}，记录 {run.name}）。{error or '未输出错误详情，请查看该记录的 stdout.log 和系统内存状态。'}")
     return json.loads(output_path.read_text(encoding="utf-8"))
 
 
@@ -480,5 +612,6 @@ if __name__ == "__main__" and len(sys.argv) == 3:
         payload.get("supports", []),
         payload.get("loads", []),
         float(payload.get("mesh_size", 4.0)),
+        holes=payload.get("holes"), expected_volume=payload.get("expected_volume"),
     )
     Path(sys.argv[2]).write_text(json.dumps(response), encoding="utf-8")

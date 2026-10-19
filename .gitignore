@@ -22,3 +22,6 @@ __pycache__/
 .python312-installer.exe
 .python312-embed.zip
 server/.cad_runs/
+
+.python313/
+server/.cad_artifacts/
