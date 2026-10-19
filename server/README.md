@@ -1,85 +1,21 @@
-# VISION local engineering backend
+# Local engineering backend
 
-The backend is a **generic execution service**, not a model library. The caller
-supplies an NVIDIA USD BRep script; the worker executes it, returns exact NURBS
-B-Rep metrics and a tessellated STL. The same STL is tetrahedralized with TetGen
-volume mesh for SfePy analysis. No wheel, blade, bracket or other model preset
-is registered.
-
-## Stack
-
-| Layer | Package | License |
-|---|---|---|
-| CAD kernel | NVIDIA USD BRep 1.0.0 (`usd-brep`) | Apache-2.0 |
-| CAD worker Python | CPython 3.12 | PSF |
-| HTTP/FEA Python | CPython 3.13 | PSF |
-| Mesh | TetGen 0.8.4 | AGPL-3.0 |
-| FEM | SfePy 2026.3 | BSD-3-Clause |
-
-The `usd-brep` wheel currently supports CPython 3.12 only. The HTTP service runs
-on 3.13 and invokes `.python312/python.exe` for CAD scripts. Override the worker
-interpreter with `VISION_USD_PYTHON`.
-
-## Install
+Run from the repository root:
 
 ```powershell
-# HTTP/FEA runtime (Python 3.13)
-python -m pip install -r requirements.txt
-
-# CAD worker (Python 3.12)
-python -m pip install usd-brep==1.0.0
+python scripts/setup_native.py --fea
+npm run backend
 ```
 
-## Run
+The HTTP process uses project-local Python 3.13, TetGen 0.8.4, scikit-fem 12 and SciPy. A separate Python 3.12 worker imports USD BRep 1.0.0; set `VISION_USD_PYTHON` to override the CAD interpreter. `VISION_ENGINEERING_PORT` overrides port 8111.
+
+`engineering_server.py` owns the HTTP contract; `usd_brep_worker.py` owns native modeling, API discovery and trimmed-face queries; `cad_artifacts.py` stores immutable geometry; `fea_contract.py` validates studies; `fea_solver.py` meshes and solves using scikit-fem.
+
+The complete modeling, artifact, region, cavity, setup and endpoint contracts are documented in [USD BRep integration](../docs/usd-brep-integration.md). Public Python modeling APIs are callable from scripts; final output supports Brep, a Brep sequence or named Brep dictionary. Numerical analysis supports multiple fixed regions and multiple resultant loads with a common isotropic material.
 
 ```powershell
-$env:VISION_ENGINEERING_PORT='8111'
-python server/engineering_server.py
+.python313/python.exe scripts/test_native_engineering.py
+python -m unittest discover -s tests -p "test_*.py"
 ```
 
-Health:
-
-```powershell
-curl http://127.0.0.1:8111/health
-```
-
-Expected:
-
-```json
-{
-  "ok": true,
-  "cad_kernel": "NVIDIA USD BRep",
-  "usd_brep": "1.0.0",
-  "usd_python": "...\\.python312\\python.exe"
-}
-```
-
-## CAD contract
-
-The script must import `usd_brep` and assign a `Brep` to `result`:
-
-```python
-import usd_brep as u
-body = u.create_box((0, 0, 0), 100, 20, 10)
-hole = u.create_cylinder((30, 10, -1), 6, 12)
-result = u.boolean_difference(body, hole)
-```
-
-Booleans consume their inputs. The worker tessellates the final Brep and writes a
-binary STL. `POST /cad/execute` returns `vision.cad/2`, exact metrics and the STL
-base64.
-
-## FEA
-
-`POST /fea/solve` accepts the STL base64, material, face supports/loads and mesh
-size. It reads the triangle PLC directly in TetGen, creates
-a C3D4 volume mesh, and runs SfePy linear elasticity.
-
-`POST /fea/validate` runs the 3D cantilever benchmark against
-`delta = PL^3 / (3EI)`. Current error: about **4.82%** at 70,404 C3D4 elements,
-within the 8% tolerance. The benchmark is computed live.
-
-## Security
-
-Both workers execute arbitrary local Python with the current user's authority.
-Bind to loopback only. This is a local engineering tool, not a sandbox.
+The numerical regression executes real CAD and FEM. API discovery and successful geometry generation do not certify arbitrary engineering designs. There is no implicit bonding, contact, shell, nonlinear or fluid solver. Workers execute arbitrary local Python: this is a local execution service, not a sandbox. Bind to loopback only.

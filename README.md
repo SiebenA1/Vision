@@ -1,176 +1,67 @@
 # VISION
 
-**AI-native CAD / CAE engineering studio.**
-
-VISION turns a natural-language engineering request into a deterministic
-NVIDIA USD BRep script, NURBS B-Rep geometry, a TetGen tetrahedral mesh, a SfePy
-linear-elastic solve, and traceable evidence. There are **no built-in model
-presets**.
-
-> Intent → NVIDIA USD BRep → TetGen → SfePy → Evidence
-
----
-
-## Architecture
-
-| Layer | Implementation |
-|---|---|
-| UI | React 19, TypeScript, Vite, Three.js, Zustand |
-| Agent | DeepSeek Chat Completions + native tool calling |
-| CAD kernel | NVIDIA USD BRep 1.0.0 (NURBS B-Rep, Apache-2.0) |
-| CAD worker | CPython 3.12 + `usd-brep` |
-| Mesh | TetGen 0.8.4 (triangle PLC → C3D4 tetrahedra) |
-| FEA | SfePy 2026.3, P1 tetrahedra, linear elasticity |
-| Persistence | localStorage project library (`vision.project.library.v2`) |
-
-The usd-brep wheel is published for **CPython 3.12 only**, so CAD scripts run in
-an isolated worker. The HTTP backend and TetGen/SfePy run on Python 3.13.
-
-```text
-User prompt
-  → DeepSeek run_usd_brep
-  → NVIDIA USD BRep script
-  → exact NURBS B-Rep
-  → tessellated STL
-  → TetGen C3D4 mesh
-  → SfePy solve
-  → nodal displacement / von Mises
-  → Three.js result field
-```
+AI-native CAD / CAE engineering studio. Natural-language intent becomes editable NVIDIA USD BRep geometry, explicit engineering loads, and reproducible numerical evidence. No built-in model presets.
 
 ## Start
 
-Requires Node.js ≥ 20.19, Python 3.13, and a separate Python 3.12 for the
-usd-brep worker.
-
-```bash
-npm install
-python -m pip install -r server/requirements.txt
-```
-
-Install the NVIDIA CAD worker:
+Node.js ≥ 20.19 and Python are required. On Windows, install project-local native runtimes once:
 
 ```powershell
-# CPython 3.12 is required by the usd-brep wheel
-python -m pip install usd-brep==1.0.0
-```
-
-The default worker path is `.python312/python.exe`. Override it with
-`VISION_USD_PYTHON` if your 3.12 interpreter lives elsewhere.
-
-Terminal 1 — backend:
-
-```bash
-npm run backend
-# http://127.0.0.1:8111
-```
-
-Terminal 2 — frontend:
-
-```bash
+npm install
+python scripts/setup_native.py --fea
 npm run dev
-# http://127.0.0.1:4173
 ```
 
-Configure a DeepSeek API key in the UI or `.env`:
+The setup installs USD BRep 1.0.0 in CPython 3.12 and TetGen / scikit-fem / SciPy in CPython 3.13 without changing system Python. `npm run dev` automatically checks and starts the local backend on loopback port 8111 before serving the UI on port 4173. An already-running healthy backend is reused; stopping Vite stops only a backend it started. The frontend fails if its port is occupied instead of silently switching ports. `npm run backend` remains available for independent backend operation.
 
-```env
-DEEPSEEK_API_KEY=sk-...
-```
+Set `VISION_ENGINEERING_PORT` to use another managed local port. Set `VISION_ENGINEERING_URL` in the environment or `.env` to connect to an independently managed backend; this disables automatic startup. An unreachable backend returns a diagnostic JSON 503; the Agent stops the turn instead of repeatedly submitting CAD calls. Configure DeepSeek in the UI or with `DEEPSEEK_API_KEY` for conversational modeling. Manual USD import, script editing, and analysis do not require an AI key.
 
-Without a key there is no modeling fallback: the application deliberately has
-no preset models.
+## Native modeling and analysis
 
-## CAD script contract
-
-A script must import `usd_brep` and assign a `Brep` to `result`:
+- Runtime discovery of the installed public Python API: functions, classes, methods, enums and documentation. The Agent queries this same interface.
+- Single solids, sheets, named multi-body results, scalar parameters, precise tessellation settings and incremental editing from original BRep artifacts.
+- Immutable native BRep + USD + per-body STL + topology + source artifacts; USD and geometry-package import/export.
+- Multiple supports and resultant loads; native trimmed BRep faces, box/sphere regions or bounding-box extreme faces; explicit analysis-body selection.
+- TetGen tetrahedra → scikit-fem P1 elasticity → SciPy sparse solve, with actual residuals, reactions, force balance, energy and mesh evidence.
+- Simplified workbench with advanced controls shown on demand, readable text, input provenance, stale-job rejection and undo.
 
 ```python
-import usd_brep as u
-
-body = u.create_box((0, 0, 0), 100, 20, 10)
-hole = u.create_cylinder((30, 10, -1), 6, 12)
-result = u.boolean_difference(body, hole)
+length = parameters.setdefault('length', 100)
+result = {'base': u.create_box((0, 0, 0), length, 20, 10),
+          'cap': u.create_cylinder((0, 40, 0), 10, 8)}
 ```
 
-Booleans consume their inputs; use `body.copy()` when a body is reused.
-The worker tessellates `result` to STL and computes exact volume, area, bbox and
-mass. Units are mm.
+The worker supplies `u`, `parameters`, and imported `parts`. Final results must be Brep objects or a sequence/dictionary of Breps. Curves and surfaces are available for intermediate construction. Booleans can consume inputs; copy reused bodies.
 
-## What works
+See [the integration contract](docs/usd-brep-integration.md) for API coverage, source replay, topology lifetimes, cavity seeds and limitations; [architecture](docs/architecture.md) and [engineering method](docs/engineering-method.md) describe implementation and evidence.
 
-- blank project; no model seed data
-- arbitrary NVIDIA USD BRep Python → NURBS B-Rep
-- exact volume, area, bounding box and mass metrics
-- STL viewport ingestion
-- TetGen triangle-PLC → C3D4 volume mesh
-- SfePy linear-elastic static solve
-- nodal displacement and von Mises field
-- face-based supports/loads (`x-min`, `x-max`, ...)
-- analytic cantilever validation, live: currently **4.82%** error (8% limit)
-- project persistence, DeepSeek streaming/tool-call loop, report export
-- geometry edits update the **active project in place** unless the user
-  explicitly requests a new project
+## HTTP API
 
-## Validation
+| Endpoint | Purpose |
+|---|---|
+| `GET /health` | Actual native import and package versions |
+| `GET /cad/capabilities?q=&offset=0` | Paginated public API discovery |
+| `POST /cad/execute` | Script, build options, source artifact → native artifact + preview |
+| `POST /cad/import` | USD or geometry ZIP → native artifact |
+| `GET /cad/artifacts/<id>/<file>` | Download USD, native geometry package and related files |
+| `POST /fea/solve` | Artifact/body selection or legacy STL + material + regions + mesh size |
+| `POST /fea/validate` | Live analytic cantilever comparison |
 
-`POST /fea/validate` runs a 100 × 20 × 10 mm steel cantilever with P = 100 N and
-compares the SfePy tip displacement against:
+## Verification
 
-```text
-delta = P L^3 / (3 E I)
-```
-
-Latest result: reference **0.095238 mm**, computed **0.088122 mm**, error
-**4.82%**, 70,404 C3D4 elements → **PASS**.
-
-## API
-
-```text
-GET  /health          kernel/package versions
-POST /cad/execute     { script, density_kg_m3 } → metrics + STL
-POST /fea/solve       { stlBase64, material, supports, loads, mesh_size }
-POST /fea/validate    live cantilever benchmark
-```
-
-## Tests
-
-```bash
-npm test          # 4/4
-npm run typecheck
+```powershell
+npm test
 npm run build
+python -m unittest discover -s tests -p "test_*.py"
+.python313/python.exe scripts/test_native_engineering.py
+npm run test:native-ui
+npm run test:backend
 ```
 
-Browser regression:
+The real native suite covers 13 CAD operation families, multi-body replay, parameters, trimmed-face queries, axial elasticity, additive forces, enclosed cavities and a flow-manifold static solve. The native browser suite requires local Microsoft Edge; it starts its own loopback backend and Vite server on ports 8115 and 4175. It verifies native face selection, multiple loads, real FEM results, annotations and readable layouts at three widths. The [twisted blade](server/examples/twisted_blade_usd.py) and [flow manifold](server/examples/flow_manifold_usd.py) are replayable engineering examples, not certified designs or default presets.
 
-```bash
-node scripts/sfepy-mock-test.mjs
-node scripts/same-project-test.mjs
-```
+## Boundaries
 
-## Limits
+Public API access does not mean every input or every API combination is validated. Current physics is homogeneous isotropic linear static elasticity with solid tetrahedra. Sheets are modeled and displayed but cannot use shell analysis. There is no assembly mating, automatic contact/bonding, plasticity, fatigue, buckling, modal analysis or CFD. Native face references must be rebound after geometry changes. Package export contains geometry artifacts; export project JSON separately for current application settings.
 
-- Face selection is by axis-aligned bounding boxes, not interactive face picking.
-- Isotropic linear elasticity only; no contact, bolt preload, composite layup,
-  fatigue, buckling or CFD.
-- TetGen consumes the tessellated USD BRep triangle PLC directly; thin walls
-  and sharp edges require mesh refinement.
-- SfePy P1 tetrahedra; peak stress is screening evidence, not certification.
-- The backend executes arbitrary local Python and is bound to loopback only.
-
-## Layout
-
-```text
-src/
-  core/cad/          external model + STL transport
-  core/fea/          result-field projection only
-  services/          DeepSeek agent, engineering backend client, simulation
-  state/             Zustand store and project persistence
-  components/        workbench, viewport, panels, project center
-  features/          lazy analysis workspace
-server/
-  engineering_server.py  HTTP endpoints
-  usd_brep_worker.py     CPython 3.12 NVIDIA CAD worker
-  fea_solver.py          TetGen + SfePy solve subprocess
-  examples/              usd_brep examples
-```
+Large previews are restored from backend artifacts rather than localStorage. Results and chat are not persisted. Client cancellation discards late responses but does not kill server jobs. The backend executes local Python with the user's authority and must remain bound to loopback.
