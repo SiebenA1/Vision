@@ -14,6 +14,7 @@ export function ViewportStage({ onRun }: ViewportStageProps) {
   const geometry = useAppStore((state) => state.geometry);
   const building = useAppStore((state) => state.building);
   const error = useAppStore((state) => state.geometryError);
+  const rebuildGeometry = useAppStore((state) => state.rebuildGeometry);
   const model = useAppStore((state) => state.model);
   const analysis = useAppStore((state) => state.analysis);
   const material = getMaterial(model.materialId);
@@ -117,6 +118,7 @@ export function ViewportStage({ onRun }: ViewportStageProps) {
             <div>
               <b>几何重建失败</b>
               <span>{error}</span>
+              <button type="button" className="button" disabled={building} onClick={() => void rebuildGeometry()}>重新载入几何</button>
             </div>
           </div>
         )}

@@ -250,6 +250,9 @@ def main():
     try:
         if request.get("operation") == "validate_separation":
             payload = validate_separation(request)
+        elif request.get("operation") == "inspect":
+            from cad_inspection import inspect
+            payload = inspect(request)
         elif request.get("operation") == "select_faces":
             payload = select_faces(request)
         elif request.get("operation") == "capabilities":

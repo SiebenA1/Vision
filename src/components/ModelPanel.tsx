@@ -280,6 +280,7 @@ export function ModelPanel() {
   const metrics = useAppStore((state) => state.geometryMetrics);
   const building = useAppStore((state) => state.building);
   const error = useAppStore((state) => state.geometryError);
+  const rebuildGeometry = useAppStore((state) => state.rebuildGeometry);
   const model = useAppStore((state) => state.model);
   const material = MATERIALS.find((item) => item.id === model.materialId) ?? MATERIALS[0];
   const toggleLeft = useAppStore((state) => state.toggleLeft);
@@ -325,6 +326,7 @@ export function ModelPanel() {
             <div>
               <b>几何重建失败</b>
               <span>{error}</span>
+              <button type="button" className="button" disabled={building} onClick={() => void rebuildGeometry()}>重新载入几何</button>
             </div>
           </div>
         )}

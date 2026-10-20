@@ -13,6 +13,7 @@ import { executeTool, labelForAction, type LastResultRef } from './agentTools';
 import { wait } from './simulation';
 import { EngineeringBackendError } from './engineeringBackend';
 import { boundedHistory, changeMemory, checkpoint, compileMemoryContext, memoryData, memoryFailure, memoryId, memoryRequest, memoryScope, recordMemoryEvent, rememberQuote, type MemoryContext, type MemoryKind } from './agentMemory';
+import { useInspectionStore } from '../state/inspectionStore';
 
 export class AgentAbortedError extends Error {
   constructor() {
@@ -179,7 +180,8 @@ export async function runDeepSeekTurn(
   const serverKey = useLlmStore.getState().serverKey;
   const store = useAppStore.getState();
   const model = store.model;
-  let currentSelection: string[] = [];
+  const selectionState = useInspectionStore.getState();
+  let currentSelection = selectionState.result && selectionState.result.artifactId === model.cad?.artifactId ? selectionState.selection : [];
   let scope = memoryScope(model, currentSelection);
   const signature = `${settings.model}:${settings.thinking}:${settings.reasoningEffort}`;
   const turnId = memoryId();

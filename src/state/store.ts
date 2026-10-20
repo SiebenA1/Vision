@@ -24,6 +24,7 @@ import {
 import { base64ToUint8, parseBinaryStl } from '../core/cad/stl';
 import { createExternalModel, type ExternalModelInput } from '../core/cad/external';
 import { getMaterial, massFromVolume, type MaterialSpec } from '../core/materials';
+import { loadCadPreview } from '../services/engineeringBackend';
 
 export interface SolveProgress {
   phase: 'mesh' | 'solve' | 'refine';
@@ -268,14 +269,12 @@ export const useAppStore = create<AppState>()((set, get) => ({
         set({ buildSeq: seq, building: true, geometryError: null });
         let bytes: Uint8Array;
         if (model.cad && !model.externalStlBase64) {
-          const response = await fetch(`/api/engineering/cad/artifacts/${model.cad.artifactId}/preview.stl`);
-          if (!response.ok) throw new Error('原生制品不可用，请导入工程包或重新执行建模脚本。');
-          bytes = new Uint8Array(await response.arrayBuffer());
-          if (get().model !== model) return null;
+          bytes = await loadCadPreview(model.cad.artifactId);
         } else {
           if (!model.externalStlBase64) throw new Error('外部模型缺少 STL 数据，请重新建模。');
           bytes = base64ToUint8(model.externalStlBase64);
         }
+        if (get().model !== model || get().buildSeq !== seq) return null;
         const geometry = parseBinaryStl(bytes, geometryFingerprint(model));
         const stored = model.externalMetrics;
         const metrics: GeometryMetrics = {
@@ -297,7 +296,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
         });
         return geometry;
       } catch (error) {
-        if (get().model !== model) return null;
+        if (get().model !== model || get().buildSeq !== seq) return null;
         set({
           buildSeq: seq,
           building: false,

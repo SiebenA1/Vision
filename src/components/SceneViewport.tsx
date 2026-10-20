@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { CSS2DObject, CSS2DRenderer } from 'three/addons/renderers/CSS2DRenderer.js';
@@ -8,6 +8,11 @@ import type { AnalysisResult, FieldKind, GeometryData, ModelDocument } from '../
 import type { MaterialSpec } from '../core/materials';
 import type { RegionSelection } from '../core/cad/types';
 import { projectField } from '../core/fea/fieldProjection';
+import { inspectionContext, useInspectionStore } from '../state/inspectionStore';
+import { useAppStore } from '../state/store';
+import { MeasurementHud } from './MeasurementHud';
+import { MeasurementControls } from './MeasurementControls';
+import { attachMeasurementAnnotations } from './measurementScene';
 
 type CameraPreset = 'iso' | 'front' | 'top' | 'side';
 
@@ -44,6 +49,7 @@ interface SceneContext {
   labels: CSS2DObject[];
   grid: THREE.GridHelper | null;
   ground: THREE.Mesh | null;
+  updateMeasurements?: () => void;
 }
 
 function disposeObject(root: THREE.Object3D) {
@@ -209,12 +215,87 @@ export function SceneViewport({
   const geometry = viewMode === 'result' && analysis?.surfaceGeometry ? analysis.surfaceGeometry : sourceGeometry;
   const containerRef = useRef<HTMLDivElement>(null);
   const contextRef = useRef<SceneContext | null>(null);
+  const inspection = useInspectionStore();
   const [cameraPreset, setCameraPreset] = useState<CameraPreset>('iso');
   const lastModelCode = useRef(model.code);
   const dataRef = useRef({ analysis, field, deformationScale, model, material });
   dataRef.current = { analysis, field, deformationScale, model, material };
+  const currentInspection = inspection.context === `${model.id}:${model.cad?.artifactId ?? ''}:${model.materialId}` ? inspection.result : null;
+  const currentSummary = inspection.context === `${model.id}:${model.cad?.artifactId ?? ''}:${model.materialId}` ? inspection.summary : null;
+  const annotatedInspection = currentInspection && inspection.smart && currentInspection.selection.length && !inspection.section
+    ? { ...currentInspection, properties: inspection.analysis?.properties ?? [] } : currentInspection;
+  const physicalInspection = currentInspection && (inspection.section || currentInspection.selection.every(id => /^body-\d+$/.test(id)))
+    ? currentInspection : currentSummary;
 
   useEffect(() => {
+    if (!active || viewMode !== 'design' || !model.cad) return;
+    const state = useInspectionStore.getState();
+    if (state.context !== inspectionContext()) {
+      state.reset();
+      void state.measure([]);
+    } else if (!state.result && !state.busy && !state.error) void state.measure([]);
+  }, [active, viewMode, model.id, model.cad?.artifactId, model.materialId]);
+
+  useEffect(() => {
+    const context = contextRef.current, container = containerRef.current;
+    if (!context || !container || !active || viewMode !== 'design' || !geometry || !inspection.showDimensions || !annotatedInspection) return;
+    const annotations = attachMeasurementAnnotations(context.scene, context.camera, container, geometry, annotatedInspection);
+    context.updateMeasurements = annotations.update;
+    return () => { context.updateMeasurements = undefined; annotations.dispose(); };
+  }, [active, viewMode, geometry, currentInspection, inspection.analysis, inspection.smart, inspection.showDimensions]);
+
+  useEffect(() => {
+    const context = contextRef.current;
+    if (!context || viewMode !== 'design' || !active || !model.cad || !geometry) return;
+    const canvas = context.renderer.domElement;
+    let start: [number, number] | null = null;
+    const down = (event: PointerEvent) => { start = event.button === 0 ? [event.clientX, event.clientY] : null; };
+    const up = (event: PointerEvent) => {
+      const origin = start;
+      start = null;
+      const state = useInspectionStore.getState();
+      if (!origin || event.button !== 0 || !state.enabled || Math.hypot(event.clientX - origin[0], event.clientY - origin[1]) > 4) return;
+      const rect = canvas.getBoundingClientRect();
+      const ray = new THREE.Raycaster();
+      ray.setFromCamera(new THREE.Vector2((event.clientX - rect.left) / rect.width * 2 - 1, -(event.clientY - rect.top) / rect.height * 2 + 1), context.camera);
+      const hit = ray.intersectObjects(context.modelGroup.children, false)[0];
+      if (!hit) return;
+      // Mesh hit locates the query only; trimmed native geometry resolves identity.
+      const pixelMm = 2 * context.camera.position.distanceTo(hit.point) * Math.tan(THREE.MathUtils.degToRad(context.camera.fov / 2)) / rect.height;
+      const tolerance = state.mode === 'edge' || state.mode === 'vertex'
+        ? Math.max(pixelMm * 8, model.cad!.settings.tolerance_mm * 2)
+        : Math.max(model.cad!.settings.tolerance_mm * 2, 1e-5);
+      void state.measure(state.context === inspectionContext() ? state.selection : [], {
+        kind: state.mode, point: hit.point.toArray(), tolerance_mm: Math.min(tolerance, 1e5), append: event.ctrlKey || event.metaKey,
+      });
+    };
+    canvas.addEventListener('pointerdown', down);
+    canvas.addEventListener('pointerup', up);
+    return () => { canvas.removeEventListener('pointerdown', down); canvas.removeEventListener('pointerup', up); };
+  }, [viewMode, active, model.cad, geometry]);
+
+  useEffect(() => {
+    const context = contextRef.current;
+    if (!context || !active || viewMode !== 'design' || !inspection.enabled || inspection.context !== inspectionContext() || !inspection.result) return;
+    const highlight = new THREE.Group();
+    for (const line of inspection.result.visual.lines) {
+      const shape = new THREE.BufferGeometry().setFromPoints(line.map(point => new THREE.Vector3(...point as [number, number, number])));
+      const wire = new THREE.Line(shape, new THREE.LineBasicMaterial({ color: 0x67e8f9, depthTest: false, transparent: true, opacity: .95 }));
+      wire.renderOrder = 10;
+      highlight.add(wire);
+    }
+    const radius = geometry ? Math.max(new THREE.Vector3(...geometry.bbox.max).distanceTo(new THREE.Vector3(...geometry.bbox.min)) * .004, .01) : .5;
+    for (const point of inspection.result.visual.points) {
+      const marker = new THREE.Mesh(new THREE.SphereGeometry(radius, 12, 12), new THREE.MeshBasicMaterial({ color: 0x67e8f9, depthTest: false }));
+      marker.position.set(...point as [number, number, number]);
+      marker.renderOrder = 11;
+      highlight.add(marker);
+    }
+    context.scene.add(highlight);
+    return () => { context.scene.remove(highlight); disposeObject(highlight); };
+  }, [inspection.result, inspection.enabled, inspection.context, viewMode, active, geometry, model.cad, model.materialId]);
+
+  useLayoutEffect(() => {
     const container = containerRef.current;
     if (!container) return;
     const scene = new THREE.Scene();
@@ -299,7 +380,10 @@ export function SceneViewport({
       const width = container.clientWidth;
       const height = container.clientHeight;
       if (!width || !height) return;
+      const before = Math.min(1, camera.aspect);
       camera.aspect = width / height;
+      const ratio = before / Math.min(1, camera.aspect);
+      camera.position.sub(controls.target).multiplyScalar(ratio).add(controls.target);
       camera.updateProjectionMatrix();
       renderer.setSize(width, height, false);
       labelRenderer.setSize(width, height);
@@ -324,6 +408,7 @@ export function SceneViewport({
       controls.update();
       renderer.render(scene, camera);
       labelRenderer.render(scene, camera);
+      context.updateMeasurements?.();
     };
     animate();
 
@@ -369,7 +454,8 @@ export function SceneViewport({
       : dirs[preset];
     camera.up.set(0, 0, 1);
     if (preset === 'top') camera.up.set(0, 1, 0);
-    camera.position.copy(center).addScaledVector(dir, radius * 3.55);
+    const halfFov = Math.atan(Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * Math.min(1, camera.aspect));
+    camera.position.copy(center).addScaledVector(dir, radius / Math.sin(halfFov) * 1.1);
     camera.near = Math.max(0.5, radius / 200);
     camera.far = radius * 40;
     camera.updateProjectionMatrix();
@@ -463,6 +549,7 @@ export function SceneViewport({
       const creased = toCreasedNormals(base, Math.PI / 7);
       const bodyMaterial = new THREE.MeshStandardMaterial({
         color: new THREE.Color(material.color),
+        side: model.cad?.bodies.some(body => body.kind === 'sheet') ? THREE.DoubleSide : THREE.FrontSide,
         metalness: 0.62,
         roughness: 0.33,
         envMapIntensity: 0.8,
@@ -655,8 +742,17 @@ export function SceneViewport({
           </select></label>
           <label><input type="checkbox" checked={showEdges} onChange={onToggleEdges} />显示边线</label>
           <label><input type="checkbox" checked={showAnnotations} onChange={onToggleAnnotations} />显示载荷与约束</label>
+          {model.cad && viewMode === 'design' && <>
+            <label><input type="checkbox" checked={inspection.showDimensions} onChange={event => inspection.setDisplay('showDimensions', event.target.checked)} />显示几何参数标注</label>
+            <label><input type="checkbox" checked={inspection.showHud} onChange={event => inspection.setDisplay('showHud', event.target.checked)} />显示属性 HUD</label>
+          </>}
         </div></details>
       </div>}
+      {active && model.cad && viewMode === 'design' && inspection.showHud && <MeasurementHud
+        result={physicalInspection} busy={inspection.busy} error={inspection.context === inspectionContext() ? inspection.error : ''} material={material}
+        onRetry={() => void inspection.measure(inspection.selection, inspection.pick, inspection.accuracy, inspection.section)}
+      />}
+      {active && model.cad && viewMode === 'design' && <MeasurementControls />}
 
     </div>
   );

@@ -192,7 +192,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send(400, {"error": str(exc)})
 
     def do_POST(self) -> None:  # noqa: N802
-        if self.path not in {"/cad/execute", "/cad/import", "/fea/solve", "/fea/validate"} and not self.path.startswith('/memory/'):
+        if self.path not in {"/cad/execute", "/cad/import", "/cad/inspect", "/fea/solve", "/fea/validate"} and not self.path.startswith('/memory/'):
             self._send(404, {"error": "not found"})
             return
         try:
@@ -230,6 +230,20 @@ class Handler(BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(length))
             if self.path.startswith('/memory/'):
                 self._send(200, agent_memory.store.handle(self.path.removeprefix('/memory/'), body))
+                return
+            if self.path == "/cad/inspect":
+                identity = body.get("artifactId")
+                manifest = json.loads(cad_artifacts.read_file(identity, "manifest.json"))
+                directory = cad_artifacts.artifact_path(identity)
+                sources = [str(directory / f"body-{i}.brep") for i in range(len(manifest["bodies"]))]
+                with tempfile.TemporaryDirectory(prefix="vision-inspect-", dir=ROOT) as temp:
+                    result = run_cad_worker({"operation": "inspect", "selection": body.get("selection", []),
+                        "pick": body.get("pick"), "section": body.get("section"), "metricIds": body.get("metricIds"), "density_kg_m3": body.get("density_kg_m3", 2700),
+                        "relative_accuracy": body.get("relative_accuracy", 1e-4),
+                        "names": [part["name"] for part in manifest["bodies"]],
+                        "source_breps": sources if all(Path(p).is_file() for p in sources) else None,
+                        "source_usd": str(directory / "model.usda")}, temp)
+                self._send(200, {**result, "artifactId": identity})
                 return
             if self.path == "/fea/solve":
                 validate_study(body.get("material"), body.get("supports"), body.get("loads"), body.get("mesh_size", 4.0))

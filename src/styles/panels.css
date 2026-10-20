@@ -1,5 +1,27 @@
 /* ── Model panel ─────────────────────────────────────────── */
 
+.measurement-panel { padding: 16px; border-bottom: 1px solid var(--line); }
+.measurement-panel h3 { margin: 0; font-size: 16px; }
+.measurement-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.measurement-panel p { font-size: 14px; line-height: 1.6; color: var(--muted); margin: 10px 0; }
+.measurement-panel label { display: flex; flex-direction: column; gap: 6px; font-size: 14px; margin: 10px 0; }
+.measurement-head label { flex-direction: row; align-items: center; margin: 0; }
+.measurement-modes { display: flex; gap: 6px; flex-wrap: wrap; margin: 12px 0; }
+.measurement-modes button { padding: 6px 10px; border: 1px solid var(--line); border-radius: 4px; font-size: 14px; }
+.measurement-modes button[aria-pressed="true"] { background: #164e63; color: #cffafe; border-color: #67e8f9; }
+.measurement-objects { width: 100%; min-height: 110px; }
+.measurement-objects option { padding: 5px; }
+.measurement-selection { overflow-wrap: anywhere; font-size: 14px; line-height: 1.5; }
+.measurement-properties { margin: 12px 0; }
+.measurement-properties > div { padding: 9px 0; border-bottom: 1px solid var(--line-soft); }
+.measurement-properties dt { font-size: 14px; color: var(--muted); }
+.measurement-properties dd { margin: 5px 0 0; font-size: 14px; font-family: var(--font-mono); overflow-wrap: anywhere; line-height: 1.6; user-select: text; }
+.measurement-note { padding-left: 9px; border-left: 2px solid var(--line); }
+.measurement-source { overflow-wrap: anywhere; }
+.measurement-panel > details { margin: 10px 0; }
+.measurement-panel summary { cursor: pointer; font-size: 14px; }
+.measurement-hint { position: absolute; left: 16px; bottom: 72px; max-width: calc(100% - 32px); padding: 9px 12px; background: #172a2a; border: 1px solid #164e63; border-radius: 5px; font-size: 14px; color: #b5eef6; pointer-events: none; z-index: 4; }
+
 .model-panel {
   width: var(--model-w);
   flex: 0 0 var(--model-w);

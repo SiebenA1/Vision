@@ -131,6 +131,25 @@ export async function engineeringBackendHealth(): Promise<EngineeringBackendHeal
   return parseResponse<EngineeringBackendHealth>(response);
 }
 
+/** Connection failures must not be reported as lost native geometry. */
+export async function loadCadPreview(artifactId: string): Promise<Uint8Array> {
+  try {
+    const response = await fetch(`/api/engineering/cad/artifacts/${encodeURIComponent(artifactId)}/preview.stl`, { cache: 'no-store' });
+    if (response.status === 404) {
+      throw new EngineeringBackendError('当前后端找不到该原生制品（HTTP 404）。请确认连接的是原建模后端；若制品确已删除，请导入工程包或重新执行建模脚本。', 404);
+    }
+    if (!response.ok) {
+      await parseResponse<never>(response);
+    }
+    return new Uint8Array(await response.arrayBuffer());
+  } catch (error) {
+    if (error instanceof TypeError) {
+      throw new EngineeringBackendError('无法连接几何后端。请启动本地后端或重启开发服务，然后点击“重新载入几何”。工程数据仍保留。');
+    }
+    throw error;
+  }
+}
+
 export async function executeNvidiaBrep(
   script: string,
   densityKgM3 = 2700,
@@ -170,23 +189,23 @@ export interface FeaSolveInput {
 
 export async function solveFea(input: FeaSolveInput, signal?: AbortSignal): Promise<FeaSolveResult> {
   try {
-  const response = await fetch('/api/engineering/fea/solve', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      stlBase64: input.stlBase64,
-      artifactId: input.artifactId,
-      bodyIds: input.bodyIds,
-      material: input.material,
-      supports: input.supports,
-      loads: input.loads,
-      mesh_size: input.meshSize,
-    }),
-    signal,
-  });
-  const result = await parseResponse<FeaSolveResult>(response);
-  assertFeaResult(result);
-  return result;
+    const response = await fetch('/api/engineering/fea/solve', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        stlBase64: input.stlBase64,
+        artifactId: input.artifactId,
+        bodyIds: input.bodyIds,
+        material: input.material,
+        supports: input.supports,
+        loads: input.loads,
+        mesh_size: input.meshSize,
+      }),
+      signal,
+    });
+    const result = await parseResponse<FeaSolveResult>(response);
+    assertFeaResult(result);
+    return result;
   } catch (error) {
     if (error instanceof TypeError && !signal?.aborted) {
       throw new EngineeringBackendError('计算连接中断，未收到本轮结果。后端可能仍在计算，请查看任务状态后再重试，避免重复提交。', 0);
@@ -264,4 +283,42 @@ export function cadArtifactFromResult(result: CadExecutionResult, sourceArtifact
     bodies: result.bodies, settings: result.settings, parameters: result.parameters ?? {}, warnings: result.warnings ?? [], sourceArtifact };
   if (!isCadArtifact(artifact)) throw new EngineeringBackendError('Invalid native CAD artifact');
   return artifact;
+}
+
+export type InspectionKind = 'body' | 'face' | 'edge' | 'vertex';
+export interface InspectionProperty {
+  annotation?: 'primary' | 'detail';
+  id?: string; targetId?: string; method?: string; nativeLabel?: string; reason?: string;
+  label: string; value: number | string | number[]; unit: string;
+  anchor?: [number, number, number];
+  dimension?: { start: [number, number, number]; end: [number, number, number]; offset?: boolean };
+  panelOnly?: boolean;
+}
+export interface CadInspection {
+  inspectionSchema?: 'vision.inspection/2';
+  requestedMetricIds?: string[] | null;
+  artifactId: string;
+  selection: string[];
+  catalog: Array<{ id: string; kind: InspectionKind; label: string }>;
+  properties: InspectionProperty[];
+  notes: string[];
+  visual: { lines: number[][][]; points: number[][] };
+  relativeAccuracy: number;
+  source: string;
+  selectionContext?: {
+    selected: Array<Record<string, unknown>>; related: Array<Record<string, unknown>>;
+    selectedTotal: number; relatedTotal: number; truncated: boolean; recognitionMethod: string;
+  } | null;
+  availableMetrics?: Array<{ id: string; label: string; unit: string; targetId?: string; method: string; description?: string }>;
+  metricErrors?: Array<{ id: string; error: string }>;
+}
+export interface CadPick {
+  kind: InspectionKind; point: [number, number, number]; tolerance_mm: number; append: boolean;
+}
+export interface CadSection { point: [number, number, number]; normal: [number, number, number] }
+export async function inspectCad(artifactId: string, selection: string[], density: number, accuracy: number, signal: AbortSignal, pick?: CadPick, section?: CadSection, metricIds?: string[]): Promise<CadInspection> {
+  return parseResponse<CadInspection>(await fetch('/api/engineering/cad/inspect', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, signal,
+    body: JSON.stringify({ artifactId, selection, density_kg_m3: density, relative_accuracy: accuracy, pick, section, metricIds }),
+  }));
 }
