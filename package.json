@@ -16,6 +16,7 @@
     "test:measurement-ui": "node scripts/measurement-ui-test.mjs",
     "test:smart-inspection-ui": "node scripts/smart-inspection-ui-test.mjs",
     "test:agent-memory": ".python313\\python.exe tests/test_agent_memory.py",
+    "test:agent-memory-ui": "node scripts/agent-memory-ui-test.mjs",
     "test:backend": "node scripts/test_dev_backend.mjs",
     "backend": "python scripts/run_backend.py"
   },

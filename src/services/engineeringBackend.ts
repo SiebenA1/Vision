@@ -262,8 +262,34 @@ export function stlBase64ToBytes(base64: string): Uint8Array {
 
 export interface CadApiEntry { group: string; name: string; symbol: string; kind: string; documentation: string }
 export interface CadCapabilities { version: string; python: string; groups: string[]; entries: CadApiEntry[]; total?: number; nextOffset?: number | null }
+export interface CadApiIndex {
+  schema: 'vision.cad.api-index/1'; version: string; fingerprint: string; groups: string[];
+  entries: Array<Omit<CadApiEntry, 'documentation'> & { signature?: string }>; total: number; usage: string;
+}
+let cadApiIndex: CadApiIndex | null = null;
+const cadApiDocuments = new Map<string, CadCapabilities>();
+
+/** Conditional GET once per user turn; a warm wheel needs no rediscovery. */
+export async function loadCadApiIndex(signal?: AbortSignal): Promise<CadApiIndex> {
+  const response = await fetch('/api/engineering/cad/api-index', {
+    headers: cadApiIndex ? { 'If-None-Match': `"${cadApiIndex.fingerprint}"` } : {},
+    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(8000)]) : AbortSignal.timeout(8000),
+  });
+  if (response.status === 304 && cadApiIndex) return cadApiIndex;
+  const index = await parseResponse<CadApiIndex>(response);
+  if (index.schema !== 'vision.cad.api-index/1' || !Array.isArray(index.entries) || typeof index.fingerprint !== 'string') throw new Error('内核接口索引格式无效');
+  if (index.fingerprint !== cadApiIndex?.fingerprint) cadApiDocuments.clear();
+  cadApiIndex = index;
+  return index;
+}
 export async function queryCadApi(query = '', offset = 0): Promise<CadCapabilities> {
-  return parseResponse<CadCapabilities>(await fetch(`/api/engineering/cad/capabilities?q=${encodeURIComponent(query)}&offset=${offset}`));
+  const key = `${cadApiIndex?.fingerprint ?? 'unindexed'}:${query.trim().toLowerCase()}:${offset}`;
+  const cached = cadApiDocuments.get(key);
+  if (cached) return cached;
+  const result = await parseResponse<CadCapabilities>(await fetch(`/api/engineering/cad/capabilities?q=${encodeURIComponent(query)}&offset=${offset}`));
+  // Do not cache failures or unknown/empty queries as learned API knowledge.
+  if (result.entries.length) cadApiDocuments.set(key, result);
+  return result;
 }
 export async function importNativeCad(dataBase64: string, format: 'usd' | 'zip', densityKgM3: number): Promise<CadExecutionResult> {
   return parseResponse<CadExecutionResult>(await fetch('/api/engineering/cad/import', {

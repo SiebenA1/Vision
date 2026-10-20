@@ -27,3 +27,4 @@ server/.cad_runs/
 server/.cad_artifacts/
 server/fea_settings.local.json
 server/.agent_memory/
+server/.cad_api/

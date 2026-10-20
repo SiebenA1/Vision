@@ -21,6 +21,7 @@ import tempfile
 import traceback
 import time
 import functools
+import hashlib
 import socket
 from urllib.parse import urlsplit, parse_qs
 import cad_artifacts
@@ -94,6 +95,30 @@ def cad_capabilities():
         return run_cad_worker({"operation": "capabilities"}, temp)
 
 
+@functools.lru_cache(maxsize=1)
+def cad_api_index():
+    capabilities = cad_capabilities()
+    fingerprint = hashlib.sha256(json.dumps(capabilities, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+    # This catalog is derived from the installed wheel, not an LLM or a model
+    # template. Full documentation stays in the cached capabilities endpoint.
+    entries = []
+    for entry in capabilities["entries"]:
+        item = {key: entry[key] for key in ("group", "name", "symbol", "kind")}
+        if "." not in entry["name"] and entry["kind"] == "function":
+            item["signature"] = entry["documentation"].split("\n", 1)[0]
+        entries.append(item)
+    result = {"schema": "vision.cad.api-index/1", "version": capabilities["version"], "fingerprint": fingerprint,
+              "groups": capabilities["groups"], "entries": entries, "total": len(entries),
+              "documentation": "/cad/capabilities?q=<exact symbol>",
+              "usage": "usd_brep 模块在脚本中可用作 u；这里是已安装内核的实际符号索引。优先使用提供的准确名称与签名，只对尚不明确的操作按 symbol 查询完整文档。不要反复搜索同一个接口。"}
+    directory = ROOT / ".cad_api"
+    directory.mkdir(exist_ok=True)
+    target = directory / f"index-{fingerprint}.json"
+    if not target.exists():
+        target.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+    return result
+
+
 def execute_usd_brep(script, density=None, options=None, source_artifact=None, usd_bytes=None):
     if not script.strip() and not source_artifact and not usd_bytes:
         raise ValueError("provide a script or native USD source")
@@ -143,6 +168,23 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         path = urlsplit(self.path)
         try:
+            if path.path == "/cad/api-index":
+                index = cad_api_index()
+                etag = '"' + index["fingerprint"] + '"'
+                if self.headers.get("If-None-Match") == etag:
+                    self.send_response(304)
+                    self.send_header("ETag", etag)
+                    self.end_headers()
+                    return
+                data = json.dumps(index, ensure_ascii=False).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Content-Length", str(len(data)))
+                self.send_header("Cache-Control", "no-cache")
+                self.send_header("ETag", etag)
+                self.end_headers()
+                self.wfile.write(data)
+                return
             if path.path in {"/health", "/cad/capabilities"}:
                 if path.path == "/cad/capabilities":
                     data = cad_capabilities()
@@ -150,6 +192,7 @@ class Handler(BaseHTTPRequestHandler):
                     if query:
                         data = {**data, "entries": [entry for entry in data["entries"]
                                 if query in entry["symbol"].lower() or query in entry["documentation"].lower()]}
+                        data["entries"].sort(key=lambda entry: (entry["symbol"].lower() != query, entry["name"].lower() != query, query not in entry["name"].lower()))
                     total = len(data["entries"])
                     offset = max(0, int(parse_qs(path.query).get("offset", ["0"])[0]))
                     self._send(200, {**data, "entries": data["entries"][offset:offset + 16], "total": total,
