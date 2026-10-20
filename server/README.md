@@ -36,3 +36,8 @@ python -m unittest discover -s tests -p "test_*.py"
 ```
 
 The numerical regression executes real CAD and FEM. API discovery and successful geometry generation do not certify arbitrary engineering designs. There is no implicit bonding, contact, shell, nonlinear or fluid solver. Workers execute arbitrary local Python: this is a local execution service, not a sandbox. Bind to loopback only.
+# 工程记忆
+
+本地 `/memory/*` 接口使用标准库 SQLite，默认持久化至 `server/.agent_memory/memory.sqlite3`（Git 忽略），可设置 `VISION_MEMORY_DB`。`/health` 的 `memory_schema` 应为 `vision.memory/1`。数据库保存在本地磁盘；不要放到网络共享盘。
+
+接口包括 `context`、`event`、`intent`、`remember`、`search`、`source`、`list`、`change`、`checkpoint`、`export`，均采用 POST 和工程不可变快照作用域。记忆在 agent 内部运行，无前端管理界面；区分用户原话、agent 任务理解与有效执行结果，不接受 LLM 自报的实测记录。参见 [实施说明](../docs/agent-memory-implementation.md) 与 `npm run test:agent-memory`。

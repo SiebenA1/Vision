@@ -24,6 +24,7 @@ import functools
 import socket
 from urllib.parse import urlsplit, parse_qs
 import cad_artifacts
+import agent_memory
 from fea_contract import validate_study
 from fea_settings import get_max_elements
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -128,7 +129,7 @@ def execute_usd_brep(script, density=None, options=None, source_artifact=None, u
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "VisionEngineering/0.2"
+    server_version = "VisionEngineering/0.3"
 
     def _send(self, status: int, payload: dict[str, Any]) -> None:
         data = json.dumps(payload, ensure_ascii=False, default=_json_default).encode("utf-8")
@@ -161,7 +162,8 @@ class Handler(BaseHTTPRequestHandler):
                     ready, version, error = False, None, str(exc)
                 versions = {"ok": ready, "cad_kernel": "NVIDIA USD BRep", "usd_brep": version,
                             "usd_python": str(USD_PYTHON), "python": sys.version.split()[0], "error": error,
-                            "max_elements": get_max_elements(), "process_id": os.getpid()}
+                            "max_elements": get_max_elements(), "process_id": os.getpid(), "memory_schema": "vision.memory/1",
+                            "memory_capabilities": ["intent", "fts5", "source_paging", "scoped_evidence"]}
                 for name in ("tetgen", "scikit-fem"):
                     try:
                         from importlib.metadata import version as package_version
@@ -190,7 +192,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send(400, {"error": str(exc)})
 
     def do_POST(self) -> None:  # noqa: N802
-        if self.path not in {"/cad/execute", "/cad/import", "/fea/solve", "/fea/validate"}:
+        if self.path not in {"/cad/execute", "/cad/import", "/fea/solve", "/fea/validate"} and not self.path.startswith('/memory/'):
             self._send(404, {"error": "not found"})
             return
         try:
@@ -226,6 +228,9 @@ class Handler(BaseHTTPRequestHandler):
             if length <= 0 or length > 32 * 1024 * 1024:
                 raise ValueError("invalid request size")
             body = json.loads(self.rfile.read(length))
+            if self.path.startswith('/memory/'):
+                self._send(200, agent_memory.store.handle(self.path.removeprefix('/memory/'), body))
+                return
             if self.path == "/fea/solve":
                 validate_study(body.get("material"), body.get("supports"), body.get("loads"), body.get("mesh_size", 4.0))
                 from fea_solver import solve as solve_fea

@@ -3,7 +3,7 @@ import { parseEngineeringPrompt } from '../core/agent/nlu';
 import { fmt } from '../lib/format';
 import { isLlmConfigured, useLlmStore } from '../state/llmStore';
 import { useAppStore } from '../state/store';
-import { AgentAbortedError, runDeepSeekTurn } from './deepseekAgent';
+import { AgentAbortedError, AgentTaskError, runDeepSeekTurn } from './deepseekAgent';
 import { executeTool, labelForAction, type LastResultRef } from './agentTools';
 import { describeApiError } from '../core/llm/client';
 import { wait } from './simulation';
@@ -146,6 +146,10 @@ export async function sendAgentPrompt(prompt: string): Promise<void> {
         }
         if (error instanceof EngineeringBackendError) {
           useAppStore.getState().addToast({ title: '工程后端调用失败', detail: error.message, tone: 'error' });
+          return;
+        }
+        if (error instanceof AgentTaskError) {
+          useAppStore.getState().addToast({ title: '工程任务未完成', detail: error.message, tone: 'error' });
           return;
         }
         const described = describeApiError(error);

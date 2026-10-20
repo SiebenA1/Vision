@@ -26,3 +26,4 @@ server/.cad_runs/
 .python313/
 server/.cad_artifacts/
 server/fea_settings.local.json
+server/.agent_memory/

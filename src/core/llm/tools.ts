@@ -28,6 +28,50 @@ export function buildDeepSeekTools(_model: ModelDocument): DeepSeekTool[] {
   return ([
     {
       type: 'function', function: {
+        name: 'withdraw_engineering_memory', description: '仅当用户本轮明确撤回某要求或要求忘记时使用。retract 保留历史但停止作为有效要求；forget 清除该来源及派生会话。不能自行删除不方便的约束；必须先维护有来源且无歧义的 revise/cancel/clarify 意图。id 来自当前记忆或历史搜索结果。',
+        parameters: { type: 'object', properties: { sourceEventId: { type: 'string' }, id: { type: 'string' }, action: { type: 'string', enum: ['retract', 'forget'] } }, required: ['sourceEventId', 'id', 'action'], additionalProperties: false },
+      },
+    },
+    {
+      type: 'function', function: {
+        name: 'read_engineering_source', description: '按当前上下文或历史搜索返回的 eventId 分页读取原始用户消息、先前方案或工具记录。摘要截断、指代不清或要核对细节时使用；不能把 assistant/intent 文本当作测量。',
+        parameters: { type: 'object', properties: { eventId: { type: 'string' }, offset: { type: 'integer', minimum: 0 } }, required: ['eventId'], additionalProperties: false },
+      },
+    },
+    {
+      type: 'function', function: {
+        name: 'search_engineering_history', description: '按本轮任务查找较早的用户原话、先前方案和带来源的执行记录。近期对话或记忆不足以确定“上次/第二个方案/原先约束”时，先检索，不能猜测。可换同义关键词再次搜索。结果是历史来源，不是当前实测。',
+        parameters: { type: 'object', properties: { query: { type: 'string', maxLength: 2000 } }, required: ['query'], additionalProperties: false },
+      },
+    },
+    {
+      type: 'function', function: {
+        name: 'update_task_intent',
+        description: '工程操作前维护本轮的任务理解。根据当前用户原话、历史用户消息和已成功工具结果，说明本轮是新目标、继续、修订、取消或澄清。理解是 agent interpretation，不是用户已确认事实；不确定的指代或互斥要求必须列入 unresolved。需要承接历史时引用 recentDialogue 或 interpretedIntent 中的真实 eventId。重要长期要求另用 remember_engineering_intent 保存。',
+        parameters: { type: 'object', properties: {
+          sourceEventId: { type: 'string' }, goal: { type: 'string', maxLength: 1500 },
+          relation: { type: 'string', enum: ['new', 'continue', 'revise', 'cancel', 'clarify'] },
+          basedOnEventIds: { type: 'array', items: { type: 'string' }, maxItems: 12 },
+          unresolved: { type: 'array', items: { type: 'string' }, maxItems: 6 },
+        }, required: ['sourceEventId', 'goal', 'relation', 'basedOnEventIds', 'unresolved'], additionalProperties: false },
+      },
+    },
+    {
+      type: 'function', function: {
+        name: 'remember_engineering_intent',
+        description: '保存用户明确声明的工程要求、决定、假设或展示偏好。content 必须逐字摘自 userSourceEventId 对应用户原话，不能写入自己生成的数字或用途推测。topic 用稳定的单一主题，如“接口孔径”或“密封用途”；同主题新旧值会保留冲突供用户选择。target 仅可为 project 或本轮选中原生对象 ID。不要把每句闲聊都保存。',
+        parameters: { type: 'object', properties: {
+          sourceEventId: { type: 'string', description: '本轮上下文提供的 userSourceEventId' },
+          content: { type: 'string', maxLength: 2000, description: '用户原话中的连续片段，保留数值、单位和条件' },
+          topic: { type: 'string', maxLength: 80 },
+          kind: { type: 'string', enum: ['requirement', 'decision', 'assumption', 'preference'] },
+          target: { type: 'string', description: 'project 或 currentSelection 中的 ID' },
+          supersedesId: { type: 'string', description: '仅用户本轮明确修订某要求时，填当前记忆中被替换项的 id；保留原记录和修订来源。必须先 update_task_intent(relation=revise)。不确定是否替换时不要填写，先澄清。' },
+        }, required: ['sourceEventId', 'content', 'topic', 'kind', 'target'], additionalProperties: false },
+      },
+    },
+    {
+      type: 'function', function: {
         name: 'query_usd_brep', description: '查询已安装 USD BRep 的真实 API 签名与文档。使用不熟悉的扫掠、曲面、抽壳、圆角、修复或导入导出前先查询；不要猜测函数签名。',
         parameters: { type: 'object', properties: { query: { type: 'string', description: 'Function name or group, e.g. pipe_sweep, create_skin, fillet, surfaces, usd' }, offset: { type: 'integer', minimum: 0 } }, required: ['query'], additionalProperties: false },
       },
