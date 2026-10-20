@@ -9,7 +9,7 @@ import { ViewportStage } from './components/ViewportStage';
 import { CopilotPanel } from './components/CopilotPanel';
 import { useAppStore } from './state/store';
 import { useLlmStore } from './state/llmStore';
-import { runStudy } from './services/simulation';
+import { getCurrentAnalysis, runStudy } from './services/simulation';
 import { sendAgentPrompt } from './services/agent';
 import { resetDeepSeekConversation } from './services/deepseekAgent';
 import { fmt } from './lib/format';
@@ -165,8 +165,8 @@ export default function App() {
   };
 
   const exportReport = async () => {
-    let result = useAppStore.getState().analysis;
-    if (!result || useAppStore.getState().resultStale || ['mesh', 'solve', 'refine', 'queued'].includes(useAppStore.getState().analysisStatus)) {
+    let result = getCurrentAnalysis();
+    if (!result) {
       result = await runStudy({ focusResult: false, silentToast: true });
     }
     if (!result) {

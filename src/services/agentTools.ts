@@ -1,13 +1,20 @@
 import type { AgentAction, FaceId, SolidShape, Vec3 } from '../core/types';
 import { MATERIALS, getMaterial } from '../core/materials';
 import { useAppStore } from '../state/store';
-import { runStudy, wait } from './simulation';
+import { getCurrentAnalysis, runStudy, wait } from './simulation';
 import { fmt, vectorLabel } from '../lib/format';
 import { directionVector } from '../core/llm/tools';
 import { EngineeringBackendError, executeNvidiaBrep, queryCadApi, cadArtifactFromResult } from './engineeringBackend';
 import { applyStudyConfiguration } from '../core/cad/study';
 
 const FACES: FaceId[] = ['x-min', 'x-max', 'y-min', 'y-max', 'z-min', 'z-max'];
+
+function studyFailure(fallback: string): Error {
+  const state = useAppStore.getState();
+  return state.analysisErrorStatus != null
+    ? new EngineeringBackendError(state.analysisError ?? fallback, state.analysisErrorStatus)
+    : new Error(state.analysisError ?? fallback);
+}
 
 function assertFace(value: unknown): FaceId {
   const face = String(value);
@@ -88,7 +95,7 @@ export function compactState(): Record<string, unknown> {
     result: result
       ? {
           modelHash: result.modelHash,
-          stale: state.resultStale,
+          stale: state.resultStale || getCurrentAnalysis() === null,
           SF: Number(result.safetyFactor.toFixed(3)),
           maxStressMPa: Number(result.maxVonMises.toFixed(2)),
           maxDisplacementMm: Number(result.maxDisplacement.toFixed(4)),
@@ -113,10 +120,12 @@ export function compactState(): Record<string, unknown> {
 
 export function riskNarrative(): string {
   const state = useAppStore.getState();
-  const result = state.analysis;
+  if (['mesh', 'solve', 'refine', 'queued'].includes(state.analysisStatus)) return '本轮计算尚未完成，保留的上一轮结果只能用于对照。';
+  if (state.analysisError) return `本轮分析未完成：${state.analysisError}。上一轮结果不能作为本轮结论。`;
+  const result = getCurrentAnalysis();
   const geometry = state.geometry;
-  if (!result || !geometry) return '尚未获得可用的求解结果。';
   if (state.resultStale) return '结果已过期，请先重新求解。';
+  if (!result || !geometry) return '尚未获得与当前工况匹配的已完成求解结果。';
   if (state.model.template === 'external') {
     return `当前节点平均应力热点坐标 (${result.maxVonMisesLocation.map((value) => fmt(value, 2)).join(', ')}) mm；峰值 ${fmt(result.maxVonMises, 2)} MPa，位移 ${fmt(result.maxDisplacement, 4)} mm，SF ${fmt(result.safetyFactor, 2)}。尚无语义面映射，不能据坐标认定具体失效部位。\n\n${result.warnings.join('；')}`;
   }
@@ -323,9 +332,8 @@ export async function executeTool(action: AgentAction, lastResultRef: LastResult
     summary = actionResultSummary({ ...action, args: { ...action.args, name: face === 'x-min' ? '背板固定面' : `${face} 固定` } });
     lastResultRef.value = null;
   } else if (action.tool === 'run_analysis') {
-    const existing = useAppStore.getState().analysis;
-    const stale = useAppStore.getState().resultStale;
-    let result = existing && !stale && (!action.args.refinement || existing.convergence) ? existing : null;
+    const existing = getCurrentAnalysis();
+    let result = existing && (!action.args.refinement || existing.convergence) ? existing : null;
     if (!result) {
       result = await runStudy({
         focusResult: false,
@@ -342,25 +350,23 @@ export async function executeTool(action: AgentAction, lastResultRef: LastResult
       summary = actionResultSummary(action);
       useAppStore.getState().setViewMode('result');
     } else {
-      const failure = useAppStore.getState();
-      if (failure.analysisErrorStatus != null) throw new EngineeringBackendError(failure.analysisError ?? '求解未返回结果', failure.analysisErrorStatus);
-      throw new Error(failure.analysisError ?? '求解未返回结果');
+      throw studyFailure('求解未返回结果');
     }
   } else if (action.tool === 'explain_risk') {
-    let result = useAppStore.getState().analysis;
-    if (!result || useAppStore.getState().resultStale) {
+    let result = getCurrentAnalysis();
+    if (!result) {
       result = await runStudy({ focusResult: false, silentToast: true, signal });
     }
-    if (!result) throw new Error('尚无结果可供诊断');
+    if (!result) throw studyFailure('尚无结果可供诊断');
     lastResultRef.value = result;
     detail = `hotspot @ ${result.maxVonMisesLocation.map((value) => fmt(value, 0)).join(', ')}`;
     summary = riskNarrative();
   } else if (action.tool === 'export_report') {
-    let result = useAppStore.getState().analysis;
-    if (!result || useAppStore.getState().resultStale) {
+    let result = getCurrentAnalysis();
+    if (!result) {
       result = await runStudy({ focusResult: false, silentToast: true, signal });
     }
-    if (!result) throw new Error('生成报告需要有效的求解结果');
+    if (!result) throw studyFailure('生成报告需要有效的求解结果');
     const { exportReportFile } = await import('../core/report/report');
     const state = useAppStore.getState();
     exportReportFile(state.model, result, state.validation);

@@ -9,6 +9,23 @@ npm run backend
 
 The HTTP process uses project-local Python 3.13, TetGen 0.8.4, scikit-fem 12 and SciPy. A separate Python 3.12 worker imports USD BRep 1.0.0; set `VISION_USD_PYTHON` to override the CAD interpreter. `VISION_ENGINEERING_PORT` overrides port 8111.
 
+The volume mesh defaults to a 1,000,000-element admission limit. To change it, stop the existing backend and launch a new one from a terminal with a positive integer environment value:
+
+```powershell
+$env:VISION_FEA_MAX_ELEMENTS='3000000'
+npm run backend
+```
+
+This raises the example limit to 3,000,000 tetrahedra. Alternatively, persist a local default in the Git-ignored `server/fea_settings.local.json`:
+
+```json
+{ "max_elements": 3500000 }
+```
+
+The environment overrides this file; without either setting the default is one million. Each solve snapshots the effective limit into its request JSON and passes it explicitly to the worker. `/health` and the startup log report the effective limit; `/health` also identifies the serving process. Worker errors use UTF-8 JSON, with tracebacks retained in UTF-8 logs.
+
+Changing the limit does not change mesh size, the TetGen Steiner-point budget, or the solve timeout. The check occurs after TetGen returns, so it is not a mesher memory cap. Higher limits increase memory and runtime requirements. An already-running backend reused by Vite retains its original environment until restarted.
+
 `engineering_server.py` owns the HTTP contract; `usd_brep_worker.py` owns native modeling, API discovery and trimmed-face queries; `cad_artifacts.py` stores immutable geometry; `fea_contract.py` validates studies; `fea_solver.py` meshes and solves using scikit-fem.
 
 The complete modeling, artifact, region, cavity, setup and endpoint contracts are documented in [USD BRep integration](../docs/usd-brep-integration.md). Public Python modeling APIs are callable from scripts; final output supports Brep, a Brep sequence or named Brep dictionary. Numerical analysis supports multiple fixed regions and multiple resultant loads with a common isotropic material.

@@ -26,6 +26,7 @@ if os.name == "nt":
                 sys.path.insert(0, str(candidate))
 
 from fea_contract import validate_study
+from fea_settings import get_max_elements, validate_max_elements
 import numpy as nm
 
 WORK_ROOT = Path(__file__).resolve().parent / ".fea_runs"
@@ -182,7 +183,7 @@ def _clean_stl(source: Path, target: Path) -> dict[str, int]:
     }
 
 
-def _mesh_from_stl(stl_path: Path, mesh_path: Path, mesh_size: float, holes=None) -> dict[str, Any]:
+def _mesh_from_stl(stl_path: Path, mesh_path: Path, mesh_size: float, holes=None, max_elements=None) -> dict[str, Any]:
     """Tetrahedralize a cleaned STL with TetGen.
 
     Gmsh's STL surface reparametrization rejects some valid NURBS tessellations
@@ -192,6 +193,8 @@ def _mesh_from_stl(stl_path: Path, mesh_path: Path, mesh_size: float, holes=None
     import struct
 
     import tetgen
+
+    max_elements = get_max_elements() if max_elements is None else validate_max_elements(max_elements)
 
     data = stl_path.read_bytes()
     count = struct.unpack_from("<I", data, 80)[0]
@@ -230,23 +233,26 @@ def _mesh_from_stl(stl_path: Path, mesh_path: Path, mesh_size: float, holes=None
     tets = nm.asarray(tets, dtype=nm.int64)
     if tets.size == 0:
         raise ValueError("TetGen produced no tetrahedra")
+    if len(tets) > max_elements:
+        raise ValueError(
+            f"生成了 {len(tets):,} 个四面体，超过当前上限 {max_elements:,}。"
+            "请增大网格尺寸，或设置 VISION_FEA_MAX_ELEMENTS 后重启后端以调整上限。"
+        )
     corners = nodes[tets]
     determinants = nm.einsum('ij,ij->i', corners[:, 1] - corners[:, 0], nm.cross(corners[:, 2] - corners[:, 0], corners[:, 3] - corners[:, 0]))
     if not nm.isfinite(determinants).all() or nm.any(nm.abs(determinants) < 1e-16):
         raise ValueError("TetGen produced a degenerate or non-finite tetrahedron")
     negative = determinants < 0
     tets[negative, :2] = tets[negative, 1::-1]
-    if len(tets) > 1_000_000:
-        raise ValueError("mesh exceeds the local one-million-element limit; use a coarser requested size")
-    # Extract boundary triangles from tet faces occurring exactly once.
-    face_owner: dict[tuple[int, int, int], list[tuple[int, int, int]]] = {}
-    for tet in tets:
-        a, b, c, d = (int(v) for v in tet)
-        for face in ((a, b, c), (a, b, d), (a, c, d), (b, c, d)):
-            key = tuple(sorted(face))
-            face_owner.setdefault(key, []).append(face)
-    boundary = [items[0] for items in face_owner.values() if len(items) == 1]
-    tris = nm.asarray(boundary, dtype=nm.int64)
+    # Compact arrays avoid millions of Python tuples/lists on fine meshes.
+    del corners, determinants, negative
+    all_faces = tets[:, [[0, 1, 2], [0, 1, 3], [0, 2, 3], [1, 2, 3]]].reshape(-1, 3)
+    canonical = nm.sort(all_faces, axis=1)
+    unique_faces, first, incidence = nm.unique(canonical, axis=0, return_index=True, return_counts=True)
+    if nm.any(incidence > 2):
+        raise ValueError("volume mesh has a face shared by more than two tetrahedra")
+    tris = all_faces[first[incidence == 1]].copy()
+    del all_faces, canonical, unique_faces, first, incidence
     with mesh_path.open("w", encoding="ascii") as handle:
         handle.write("MeshVersionFormatted 1\nDimension 3\n")
         handle.write(f"Vertices\n{len(nodes)}\n")
@@ -328,7 +334,7 @@ def _solve_impl(
     supports: list[dict[str, Any]],
     loads: list[dict[str, Any]],
     mesh_size: float = 4.0,
-    holes=None, expected_volume=None,
+    holes=None, expected_volume=None, max_elements=None,
 ) -> dict[str, Any]:
     import base64
 
@@ -353,7 +359,7 @@ def _solve_impl(
             "Union the touching bodies or regenerate the B-Rep so every edge has exactly 2 triangles."
         )
     mesh_path = run_dir / "model.mesh"
-    mesh = _mesh_from_stl(clean_path, mesh_path, mesh_size, holes)
+    mesh = _mesh_from_stl(clean_path, mesh_path, mesh_size, holes, max_elements)
     mesh_ms = (time.perf_counter() - build_started) * 1000
     points = mesh["vertices"]
     tets = mesh["tets"]
@@ -441,13 +447,21 @@ def _solve_impl(
     tetra_mesh = MeshTet(points.T, tets.T, sort_t=False)
     # P1 tetrahedral strain is constant: one quadrature point integrates
     # homogeneous linear elasticity exactly, without four copies of the fields.
-    basis = Basis(tetra_mesh, ElementVector(ElementTetP1()), intorder=1)
+    batch_size = 32768
+    basis = Basis(tetra_mesh, ElementVector(ElementTetP1()), intorder=1,
+                  elements=nm.arange(min(batch_size, len(tets))), disable_doflocs=True)
     form = linear_elasticity(*lame_parameters(E, nu))
     print(f"assembly: {len(tets)} elements, {basis.N} DOFs", flush=True)
     stiffness = None
-    for start in range(0, len(tets), 32768):
-        chunk = asm(form, basis.with_elements(nm.arange(start, min(start + 32768, len(tets)))))
+    for start in range(0, len(tets), batch_size):
+        batch_basis = basis if start == 0 else Basis(
+            tetra_mesh, basis.elem, mapping=basis.mapping, quadrature=basis.quadrature,
+            dofs=basis.dofs, elements=nm.arange(start, min(start + batch_size, len(tets))),
+            disable_doflocs=True,
+        )
+        chunk = asm(form, batch_basis)
         stiffness = chunk if stiffness is None else stiffness + chunk
+        del chunk, batch_basis
     rhs = nm.zeros(basis.N)
     rhs[basis.nodal_dofs] = nodal_forces.T
     fixed_dofs = basis.nodal_dofs[:, fixed_nodes].reshape(-1)
@@ -572,6 +586,7 @@ def solve(
                 "supports": supports,
                 "loads": loads,
                 "mesh_size": mesh_size, "holes": holes, "expected_volume": expected_volume,
+                "max_elements": get_max_elements(),
             },
             ensure_ascii=False,
         ),
@@ -579,6 +594,8 @@ def solve(
     )
     env = os.environ.copy()
     env["PYTHONPATH"] = os.pathsep.join(sys.path)
+    env["PYTHONUTF8"] = "1"
+    env["PYTHONIOENCODING"] = "utf-8"
     if not _SOLVE_SLOT.acquire(blocking=False):
         raise FeaBusyError("已有网格或求解任务运行中，请等待其结束后再提交；重复提交会增加内存压力。")
     import time
@@ -586,7 +603,7 @@ def solve(
     try:
         with (run / "stdout.log").open("w", encoding="utf-8") as stdout, (run / "stderr.log").open("w", encoding="utf-8") as stderr:
             proc = subprocess.run(
-                [sys.executable, str(Path(__file__).resolve()), str(request_path), str(output_path)],
+                [sys.executable, "-X", "utf8", str(Path(__file__).resolve()), str(request_path), str(output_path)],
                 cwd=str(run), env=env, stdout=stdout, stderr=stderr, text=True,
                 timeout=SOLVE_TIMEOUT_SECONDS,
             )
@@ -599,19 +616,28 @@ def solve(
     finally:
         _SOLVE_SLOT.release()
     if proc.returncode != 0:
+        failure = {}
+        if output_path.exists():
+            try:
+                failure = json.loads(output_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                pass
         error = (run / "stderr.log").read_text(encoding="utf-8", errors="replace")[-4000:]
-        raise RuntimeError(f"求解进程退出（代码 {proc.returncode}，记录 {run.name}）。{error or '未输出错误详情，请查看该记录的 stdout.log 和系统内存状态。'}")
+        detail = failure.get("error") or error or '未输出错误详情，请查看该记录的 stdout.log 和系统内存状态。'
+        raise RuntimeError(f"求解未完成（代码 {proc.returncode}，记录 {run.name}）：{detail}")
     return json.loads(output_path.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__" and len(sys.argv) == 3:
     payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-    response = _solve_impl(
-        payload["stlBase64"],
-        payload.get("material", {}),
-        payload.get("supports", []),
-        payload.get("loads", []),
-        float(payload.get("mesh_size", 4.0)),
-        holes=payload.get("holes"), expected_volume=payload.get("expected_volume"),
-    )
-    Path(sys.argv[2]).write_text(json.dumps(response), encoding="utf-8")
+    try:
+        response = _solve_impl(
+            payload["stlBase64"], payload.get("material", {}), payload.get("supports", []),
+            payload.get("loads", []), float(payload.get("mesh_size", 4.0)),
+            holes=payload.get("holes"), expected_volume=payload.get("expected_volume"),
+            max_elements=payload.get("max_elements"),
+        )
+    except Exception as exc:
+        Path(sys.argv[2]).write_text(json.dumps({"error": str(exc), "errorType": type(exc).__name__}, ensure_ascii=False), encoding="utf-8")
+        raise
+    Path(sys.argv[2]).write_text(json.dumps(response, ensure_ascii=False), encoding="utf-8")

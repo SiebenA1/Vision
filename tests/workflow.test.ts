@@ -9,7 +9,10 @@ import { toolAction } from '../src/services/deepseekAgent';
 import { getMaterial } from '../src/core/materials';
 import type { GeometryData } from '../src/core/types';
 
-vi.mock('../src/services/engineeringBackend', () => ({ solveFea: vi.fn(), validateFea: vi.fn() }));
+vi.mock('../src/services/engineeringBackend', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../src/services/engineeringBackend')>(),
+  solveFea: vi.fn(), validateFea: vi.fn(),
+}));
 const geometry: GeometryData = {
   positions: new Float32Array([0, 0, 0]), indices: new Uint32Array(),
   bbox: { min: [0, 0, 0], max: [10, 10, 10] }, volumeMm3: 1000, areaMm2: 600,

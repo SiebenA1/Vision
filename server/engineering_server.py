@@ -21,9 +21,11 @@ import tempfile
 import traceback
 import time
 import functools
+import socket
 from urllib.parse import urlsplit, parse_qs
 import cad_artifacts
 from fea_contract import validate_study
+from fea_settings import get_max_elements
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -158,7 +160,8 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception as exc:
                     ready, version, error = False, None, str(exc)
                 versions = {"ok": ready, "cad_kernel": "NVIDIA USD BRep", "usd_brep": version,
-                            "usd_python": str(USD_PYTHON), "python": sys.version.split()[0], "error": error}
+                            "usd_python": str(USD_PYTHON), "python": sys.version.split()[0], "error": error,
+                            "max_elements": get_max_elements(), "process_id": os.getpid()}
                 for name in ("tetgen", "scikit-fem"):
                     try:
                         from importlib.metadata import version as package_version
@@ -294,11 +297,23 @@ class Handler(BaseHTTPRequestHandler):
         sys.stderr.write("[backend] " + (fmt % args) + "\n")
 
 
+class EngineeringHTTPServer(ThreadingHTTPServer):
+    # Windows SO_REUSEADDR permits multiple listeners on the same address;
+    # requests can then reach an obsolete backend with different settings.
+    allow_reuse_address = os.name != "nt"
+
+    def server_bind(self):
+        if os.name == "nt":
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
+
+
 def main() -> None:
-    server = ThreadingHTTPServer((HOST, PORT), Handler)
+    server = EngineeringHTTPServer((HOST, PORT), Handler)
     print(f"VISION engineering backend on http://{HOST}:{PORT}")
     print(f"CAD kernel=NVIDIA USD BRep python={USD_PYTHON}")
     print(f"FEA=TetGen+scikit-fem python={sys.version.split()[0]}")
+    print(f"FEA max_elements={get_max_elements():,} (environment override or local settings)")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

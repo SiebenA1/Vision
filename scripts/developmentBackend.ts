@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { createWriteStream, existsSync, mkdirSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -22,16 +22,27 @@ export async function startDevelopmentBackend(target: string, root: string): Pro
 
   const runtime = join(root, '.python313', 'python.exe');
   const url = new URL(target);
+  const logDirectory = join(root, 'server', '.fea_runs');
+  mkdirSync(logDirectory, { recursive: true });
+  const log = createWriteStream(join(logDirectory, 'backend.log'), { flags: 'a' });
+  log.on('error', error => console.warn(`Cannot write engineering backend log: ${error.message}`));
+  log.write(`\n[${new Date().toISOString()}] Starting backend at ${target}\n`);
   const child = spawn(existsSync(runtime) ? runtime : 'python', ['-u', join(root, 'server', 'engineering_server.py')], {
     cwd: root, windowsHide: true,
     env: { ...process.env, VISION_ENGINEERING_HOST: url.hostname, VISION_ENGINEERING_PORT: url.port },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let diagnostics = '';
-  const capture = (chunk: Buffer) => { diagnostics = (diagnostics + chunk.toString()).slice(-4000); };
+  const capture = (chunk: Buffer) => {
+    diagnostics = (diagnostics + chunk.toString()).slice(-4000);
+    if (!log.destroyed) log.write(chunk);
+  };
   child.stdout.on('data', capture);
   child.stderr.on('data', capture);
   child.on('error', error => { diagnostics = error.message; });
+  child.once('close', (code, signal) => {
+    if (!log.destroyed) log.end(`[${new Date().toISOString()}] Backend exited: code=${code}, signal=${signal}\n`);
+  });
   const stop = () => { if (child.exitCode === null) child.kill(); };
   process.once('exit', stop);
   const dispose = () => { process.removeListener('exit', stop); stop(); };

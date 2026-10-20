@@ -35,19 +35,29 @@ function toVec3(value: number[]): Vec3 {
   return [value[0] ?? 0, value[1] ?? 0, value[2] ?? 0];
 }
 
+/** Retained output is not evidence that the latest requested run succeeded. */
+export function getCurrentAnalysis(): AnalysisResult | null {
+  const state = useAppStore.getState();
+  return state.analysisStatus === 'ready' && !state.analysisError && !state.resultStale &&
+    state.analysis?.inputFingerprint === studyFingerprint(state.model) ? state.analysis : null;
+}
+
 export function runStudy(options: RunStudyOptions = {}): Promise<AnalysisResult | null> {
+  if (options.signal?.aborted) return Promise.resolve(null);
   const state = useAppStore.getState();
   const key = `${state.activeProjectId}:${studyKey(state.model)}`;
   if (pending?.key === key) {
     if (!options.refinement || pending.refinement) return pending.promise;
-    return pending.promise.then(() => {
+    return pending.promise.then((result) => {
+      if (!result || options.signal?.aborted) return null;
       const latest = useAppStore.getState();
       return `${latest.activeProjectId}:${studyKey(latest.model)}` === key ? runStudy(options) : null;
     });
   }
   const promise = performStudy(options);
   pending = { key, refinement: Boolean(options.refinement), promise };
-  void promise.finally(() => { if (pending?.promise === promise) pending = null; });
+  const clearPending = () => { if (pending?.promise === promise) pending = null; };
+  void promise.then(clearPending, clearPending);
   return promise;
 }
 
@@ -58,30 +68,30 @@ async function performStudy(options: RunStudyOptions): Promise<AnalysisResult | 
   const signal = options.signal ? AbortSignal.any([abort.signal, options.signal]) : abort.signal;
   const token = ++runToken;
   const { model } = useAppStore.getState();
-  const currentGeometry = await useAppStore.getState().rebuildGeometry();
-  if (token !== runToken || signal.aborted) return null;
-  if (!currentGeometry) {
-    useAppStore.getState().setAnalysisError(useAppStore.getState().geometryError ?? '几何体尚未就绪');
-    useAppStore.getState().setAnalysisStatus('error');
-    return null;
-  }
-  if (!model.cad && (!model.externalScript || !model.externalStlBase64)) {
-    const message = '当前模型没有原生 CAD 制品或 STL，无法生成实体网格。';
-    useAppStore.getState().setAnalysisError(message);
-    useAppStore.getState().setAnalysisStatus('error');
-    useAppStore.getState().addToast({ title: '无法求解', detail: message, tone: 'error' });
-    return null;
-  }
-
-  const material = getMaterial(model.materialId);
-  useAppStore.setState({
-    analysisStatus: 'solve', analysisError: null, analysisErrorStatus: null,
-    solveProgress: { phase: 'solve', percent: null,
-      detail: '正在生成网格并求解，完成后将更新本轮结果。' },
-  });
-  if (options.openWorkspace) useAppStore.getState().openWorkspace('analysis');
-
   try {
+    const currentGeometry = await useAppStore.getState().rebuildGeometry();
+    if (token !== runToken || signal.aborted) return null;
+    if (!currentGeometry) {
+      useAppStore.getState().setAnalysisError(useAppStore.getState().geometryError ?? '几何体尚未就绪');
+      useAppStore.getState().setAnalysisStatus('error');
+      return null;
+    }
+    if (!model.cad && (!model.externalScript || !model.externalStlBase64)) {
+      const message = '当前模型没有原生 CAD 制品或 STL，无法生成实体网格。';
+      useAppStore.getState().setAnalysisError(message);
+      useAppStore.getState().setAnalysisStatus('error');
+      useAppStore.getState().addToast({ title: '无法求解', detail: message, tone: 'error' });
+      return null;
+    }
+
+    const material = getMaterial(model.materialId);
+    useAppStore.setState({
+      analysisStatus: 'solve', analysisError: null, analysisErrorStatus: null,
+      solveProgress: { phase: 'solve', percent: null,
+        detail: '正在生成网格并求解，完成后将更新本轮结果。' },
+    });
+    if (options.openWorkspace) useAppStore.getState().openWorkspace('analysis');
+
     const input = {
       stlBase64: model.cad ? '' : model.externalStlBase64!,
       artifactId: model.cad?.artifactId,

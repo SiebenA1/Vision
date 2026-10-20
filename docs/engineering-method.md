@@ -8,7 +8,9 @@ CAD mass = native volume × 1e-9 × current material density. FEA mass uses tetr
 
 ## Meshing and regions
 
-STL cleanup welds vertices, removes duplicate/degenerate triangles and rejects open or non-manifold edges; it is not a general self-intersection proof. TetGen uses a triangle PLC and produces P1/C3D4 tetrahedra. Requested h controls maximum tetrahedral volume h³, without implicit 0.5 mm or diagonal/140 clamping; it is not a guaranteed maximum edge length. Steiner point and one-million-element limits bound local workloads.
+STL cleanup welds vertices, removes duplicate/degenerate triangles and rejects open or non-manifold edges; it is not a general self-intersection proof. TetGen uses a triangle PLC and produces P1/C3D4 tetrahedra. Requested h controls maximum tetrahedral volume h³, without implicit 0.5 mm or diagonal/140 clamping; it is not a guaranteed maximum edge length. TetGen has a Steiner-point budget. The post-meshing admission limit defaults to one million elements and can be changed with the positive integer environment variable `VISION_FEA_MAX_ELEMENTS` before restarting the backend. It does not cap TetGen's own peak memory or change the solve timeout.
+
+The ignored `server/fea_settings.local.json` can persist `max_elements` when no environment override is present. The service records the effective limit in every numerical request and passes it explicitly to the worker, avoiding reliance on the worker's fallback environment. Startup logs and `/health` expose the effective limit; child errors and logs use explicit UTF-8 encoding.
 
 Closed internal voids require explicit `mesh_holes` seeds; a native void census without seeds is rejected. Through-holes open to the exterior do not need void seeds. Negative tetrahedral orientation is normalized, and degenerate elements are rejected.
 
@@ -23,6 +25,8 @@ scikit-fem assembles three-dimensional isotropic P1 elasticity with Lamé parame
 Assembly uses batches of 32,768 elements and one-point quadrature, which integrates homogeneous P1 tetrahedral elasticity exactly. Systems above 60,000 total DOFs use SciPy CG with Jacobi preconditioning; smaller systems use sparse direct factorization. CG requires relative tolerance 1e-8, at most 10,000 iterations, and the same final free-DOF residual check. The backend admits one numerical job at a time, records stdout/stderr and execution diagnostics per request, and terminates a solve after 600 seconds. The engineering proxy allows 900 seconds to include native geometry preflight. The independent analytic benchmark is now manual, avoiding an extra solve after each user analysis.
 
 These latest memory, iterative-solver, timeout and admission changes have not been tested, as requested by the user. The numerical records below were collected before those changes and are historical regression evidence, not validation of the new CG path.
+
+Follow-up source and log review on 2026-10-20 found three successful manual-run records from 2026-10-19: 547,903 elements / 302,436 DOFs in about 87 seconds, and two 518,354-element runs in about 82–83 seconds, all with process exit code zero. These local records show successful executions of the earlier CG implementation; they are not an automated regression or a general convergence guarantee. The follow-up changes restrict basis construction to each assembly batch, reuse global DOF metadata, disable unused DOF locations, and extract boundary faces with compact NumPy arrays. Those follow-up changes have not been executed or tested.
 
 The service computes free-DOF relative residual, reactions from Ku−f, reaction plus applied-force equilibrium residual, strain energy, actual timing, oriented mesh volume and a normalized scaled-Jacobian indicator. Relative residual above 1e-6 fails. Missing alternative quality metrics remain unknown, and success does not establish local stress convergence.
 
@@ -41,5 +45,7 @@ The executable native regression additionally checks axial displacement PL/(EA),
 Geometry changes invalidate native face references. Material, body selection, region and mesh changes invalidate old results. Reports check the current study fingerprint. Cancellation rejects late responses but does not kill native processes.
 
 The synchronous solve endpoint does not stream stage percentages. The UI therefore uses indeterminate progress until the response arrives. During recalculation, retained results are explicitly marked as the previous run; completion publishes the new result, ready state and progress cleanup atomically. Reports wait for an active run rather than silently exporting its predecessor.
+
+Agent analysis, explanations and report export share the same current-result guard: status must be ready, inputs must match, and no current failure or stale flag may remain. A failed baseline does not automatically schedule a queued refinement. Backend startup and exit logs are retained in `server/.fea_runs/backend.log`; these diagnostic files remain local and ignored by Git.
 
 Default safety-factor and displacement thresholds are screening values, not universal design criteria. Contact, plasticity, composites, fatigue, buckling, modal, shell/beam and fluid/thermal analyses remain unsupported. See [the integration contract](usd-brep-integration.md) for executable setup and examples.
