@@ -62,12 +62,12 @@ def install(version, directory, requirements):
         subprocess.run([str(executable), "-m", "ensurepip"], check=True)
     if requirements.endswith("requirements-usd-brep.txt"):
         wheel = package_wheel(target)
-        subprocess.run([str(executable), "-m", "pip", "install", "--no-warn-script-location", str(wheel)], check=True)
+        subprocess.run([str(executable), "-m", "pip", "--disable-pip-version-check", "install", "--no-warn-script-location", str(wheel)], check=True)
     else:
         for name, version, tag in [("numpy", "2.2.6", "cp313-cp313-win_amd64.whl"), ("scipy", "1.15.3", "cp313-cp313-win_amd64.whl"), ("tetgen", "0.8.4", "cp312-abi3-win_amd64.whl")]:
             wheel = package_wheel(target, name, version, tag)
-            subprocess.run([str(executable), "-m", "pip", "install", "--no-deps", "--no-warn-script-location", str(wheel)], check=True)
-        subprocess.run([str(executable), "-m", "pip", "install", "--no-warn-script-location", "-r", str(ROOT / requirements)], check=True)
+            subprocess.run([str(executable), "-m", "pip", "--disable-pip-version-check", "install", "--no-deps", "--no-warn-script-location", str(wheel)], check=True)
+        subprocess.run([str(executable), "-m", "pip", "--disable-pip-version-check", "install", "--no-warn-script-location", "-r", str(ROOT / requirements)], check=True)
     print(f"Ready: {executable}")
 
 

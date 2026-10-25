@@ -334,9 +334,11 @@ def _solve_impl(
     supports: list[dict[str, Any]],
     loads: list[dict[str, Any]],
     mesh_size: float = 4.0,
-    holes=None, expected_volume=None, max_elements=None,
+    holes=None, expected_volume=None, max_elements=None, surface_topology=False, linear_solver="auto",
 ) -> dict[str, Any]:
     import base64
+    if linear_solver not in ("auto", "direct", "cg"):
+        raise ValueError("linear_solver must be auto, direct or cg")
 
     active_supports, active_loads = validate_study(material, supports, loads, mesh_size)
     import time
@@ -468,7 +470,7 @@ def _solve_impl(
     iterations = None
     algorithm = "Direct"
     preconditioner = "Direct"
-    if basis.N > 60000:
+    if linear_solver == "cg" or (linear_solver == "auto" and basis.N > 60000):
         from scipy.sparse.linalg import cg, LinearOperator
         reduced, reduced_rhs, displacement, free_dofs = condense(stiffness, rhs, D=fixed_dofs)
         diagonal = reduced.diagonal()
@@ -556,6 +558,7 @@ def _solve_impl(
         "maxDisplacementLocation": [float(v) for v in vtk_points[dmax]],
         "safetyFactor": yield_strength / max_vm if max_vm > 1e-9 else 1e9,
         "positions": nm.asarray(vtk_points, dtype=nm.float32).ravel().tolist(),
+        **({"surfaceTriangles": nm.asarray(tetra_mesh.facets[:, tetra_mesh.boundary_facets()].T, dtype=nm.uint32).ravel().tolist()} if surface_topology else {}),
         "displacement": nm.asarray(u, dtype=nm.float32).ravel().tolist(),
         "vonMises": nm.asarray(von_mises, dtype=nm.float32).ravel().tolist(),
         "supportArea": 0.0,

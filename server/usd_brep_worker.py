@@ -92,6 +92,28 @@ def capabilities():
             "solver": {"analysis": ["linear-static"], "contact": False, "shellElements": False}}
 
 
+def _placed_stl(source, target, rotation, translation):
+    """Place a canonical display mesh without re-tessellating unchanged BRep."""
+    matrices=[]
+    for axis,angle in enumerate(rotation):
+        c,s=math.cos(math.radians(angle)),math.sin(math.radians(angle))
+        matrices.append((((1,0,0),(0,c,-s),(0,s,c)),((c,0,s),(0,1,0),(-s,0,c)),((c,-s,0),(s,c,0),(0,0,1)))[axis])
+    def transformed(values,position=False):
+        v=list(values)
+        for matrix in matrices:v=[sum(row[i]*v[i] for i in range(3)) for row in matrix]
+        return [v[i]+translation[i] if position else v[i] for i in range(3)]
+    data=source.read_bytes()
+    count=struct.unpack_from('<I',data,80)[0]
+    if len(data)!=84+count*50:raise ValueError('cached STL size mismatch')
+    output=bytearray(data[:84])
+    for record in struct.iter_unpack('<12fH',data[84:]):
+        values=transformed(record[:3])
+        for offset in (3,6,9):values.extend(transformed(record[offset:offset+3],True))
+        output.extend(struct.pack('<12fH',*values,record[12]))
+    target.write_bytes(output)
+    return count
+
+
 def _number(value, name, low, high):
     if isinstance(value, bool) or not isinstance(value, (float, int)) or not math.isfinite(value) or not low <= value <= high:
         raise ValueError(f"{name} must be finite in [{low}, {high}]")
@@ -121,8 +143,9 @@ def execute(script, density, options=None, source_usd=None, source_breps=None):
         for index, brep in enumerate(loaded):
             names = options.get("source_names", [])
             parts[names[index] if index < len(names) else f"body_{index + 1}"] = brep
+    parameters = options.get("parameters", {})
     namespace = {"__name__": "__vision_usd_brep__", "u": usd_brep, "parts": parts,
-                 "parameters": options.get("parameters", {})}
+                 "parameters": parameters, "params": parameters}
     if script.strip():
         exec(compile(script, "<usd-brep-script>", "exec"), namespace, namespace)
         result = namespace.get("result")
@@ -141,7 +164,16 @@ def execute(script, density, options=None, source_usd=None, source_breps=None):
     if options.get("heal", False):
         for body in result.values():
             usd_brep.heal_brep(body)
+    module_files={}
+    if options.get('module_component_names'):
+        local=namespace.get('__local',{})
+        for index,name in enumerate(options['module_component_names']):
+            body=local.get(name)
+            if not isinstance(body,usd_brep.Brep):raise ValueError('module local geometry is missing')
+            filename=f'module-{index}.brep'
+            body.write_to_file(str(out_dir/filename));module_files[name]=filename
     bodies = []
+    module_mesh_files={};mesh_reused=[]
     for index, (name, body) in enumerate(result.items()):
         body.write_to_file(str(out_dir / f"body-{index}.brep"))
         solid = bool(body.is_manifold_solid())
@@ -150,11 +182,24 @@ def execute(script, density, options=None, source_usd=None, source_breps=None):
         area = sum(float(face.area(accuracy)) for face in body.faces())
         if not all(math.isfinite(v) for v in [volume, area, *bounds["min"], *bounds["max"]]) or (solid and volume <= 0):
             raise ValueError(f"invalid metrics for body {name}")
-        poly = usd_brep.tessellate(body, chord_height_tolerance=tolerance,
-                                  curve_angle_tolerance_deg=angle, surface_angle_tolerance_deg=angle)
-        arrays = poly.to_mesh_arrays()
         filename = f"body-{index}.stl"
-        triangles = _write_stl(out_dir / filename, arrays)
+        if name in module_files:
+            canonical=out_dir/f'module-{index}.stl'
+            cached=options.get('module_mesh_sources',{}).get(name)
+            if cached:
+                import shutil
+                shutil.copyfile(cached,canonical);mesh_reused.append(name)
+            else:
+                poly=usd_brep.tessellate(namespace['__local'][name],chord_height_tolerance=tolerance,
+                                        curve_angle_tolerance_deg=angle,surface_angle_tolerance_deg=angle)
+                _write_stl(canonical,poly.to_mesh_arrays())
+            pose=options['module_placements'][name]
+            triangles=_placed_stl(canonical,out_dir/filename,pose['rotation_deg'],pose['translation'])
+            module_mesh_files[name]=canonical.name
+        else:
+            poly = usd_brep.tessellate(body, chord_height_tolerance=tolerance,
+                                      curve_angle_tolerance_deg=angle, surface_angle_tolerance_deg=angle)
+            triangles = _write_stl(out_dir / filename, poly.to_mesh_arrays())
         faces = []
         for face_index, face in enumerate(body.faces()):
             faces.append({"id": f"body-{index}/face-{face_index}", "index": face_index,
@@ -189,6 +234,8 @@ def execute(script, density, options=None, source_usd=None, source_breps=None):
                 "buildMs": (time.perf_counter() - started) * 1000,
                 "nativeSha256": hashlib.sha256(b"".join((out_dir / f"body-{i}.brep").read_bytes() for i in range(len(bodies)))).hexdigest(),
                 "warnings": ["Face and edge IDs are scoped to this artifact; rebind study regions after geometry edits."]}
+    if module_files:
+        manifest.update(module_files=module_files,module_mesh_files=module_mesh_files,module_mesh_reused=mesh_reused)
     stl = (out_dir / "preview.stl").read_bytes()
     manifest["metrics"] = {"volume_mm3": sum(body["volume_mm3"] for body in bodies),
                            "area_mm2": sum(body["area_mm2"] for body in bodies),
@@ -262,7 +309,10 @@ def main():
                               request.get("options", {}), request.get("source_usd"), request.get("source_breps"))
         output.write_text(json.dumps(payload, ensure_ascii=False, allow_nan=False), encoding="utf-8")
     except Exception as exc:
-        output.write_text(json.dumps({"error": str(exc), "trace": traceback.format_exc(limit=12)}), encoding="utf-8")
+        script_error = (any(frame.filename == '<usd-brep-script>' for frame in traceback.extract_tb(exc.__traceback__))
+                        or isinstance(exc, SyntaxError) and exc.filename == '<usd-brep-script>')
+        output.write_text(json.dumps({"error": str(exc), "trace": traceback.format_exc(limit=12),
+            'error_kind': 'cad_script' if script_error and not isinstance(exc, (OSError, MemoryError)) else 'native_failure'}), encoding="utf-8")
         raise
 
 
