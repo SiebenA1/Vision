@@ -31,5 +31,3 @@
 .spin { animation: workspace-spin 1.1s linear infinite; }
 @keyframes workspace-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .spin { animation: none; } }
-
-

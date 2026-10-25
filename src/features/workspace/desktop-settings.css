@@ -69,4 +69,3 @@
 .project-export[open] { flex-basis: 100%; }
 .project-export[open] > summary { width: max-content; }
 .project-export > div { display: flex; flex-wrap: wrap; gap: 12px; padding: 12px 0 3px; font-size: 11px; }
-

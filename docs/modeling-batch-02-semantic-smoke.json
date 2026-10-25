@@ -1,0 +1,39 @@
+{
+  "query_characters": 458,
+  "reranker_pair_tokens": 56,
+  "tail_present_in_tokenized_pair": true,
+  "ranking": [
+    {
+      "text": "最新方案：两片式浮动盘，安装面厚度改为34mm。",
+      "score": 3.4117660522460938
+    },
+    {
+      "text": "旧方案：制动盘外径380mm、安装面厚度28mm。",
+      "score": -0.3136194050312042
+    },
+    {
+      "text": "仅调整蓝色外观和渲染背景。",
+      "score": -6.8184943199157715
+    }
+  ],
+  "metadata": {
+    "embedding": "BAAI/bge-small-zh-v1.5",
+    "reranker": "BAAI/bge-reranker-v2-m3-int8",
+    "local_only": true,
+    "models_ready": true,
+    "cache_present": true,
+    "vector_database": "Qdrant local; SQLite persists rebuildable vectors",
+    "mode": "hybrid_reranked",
+    "degraded_reason": null,
+    "candidate_chunks": 3,
+    "lexical_hits": 3,
+    "dense_hits": 3,
+    "reranked_chunks": 3,
+    "returned_sources": 3,
+    "candidate_sources": 3,
+    "rerank_query_characters": 44,
+    "original_query_characters": 458,
+    "result_cache_hit": false,
+    "duration_ms": 6440.79
+  }
+}

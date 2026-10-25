@@ -103,6 +103,3 @@ export function MemoryPanel({ project, revision, task, onClose, embedded = false
   </>;
   return embedded ? <section className="settings-memory" aria-label="当前工程上下文">{content}</section> : <dialog ref={dialog} className="core-modal engineering-memory" aria-label="当前工程上下文" onCancel={event => { event.preventDefault(); if (!busy) onClose(); }}>{content}</dialog>;
 }
-
-
-

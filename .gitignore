@@ -28,3 +28,13 @@ server/.cad_artifacts/
 server/fea_settings.local.json
 server/.agent_memory/
 server/.cad_api/
+.vision-workspace/
+.memory-models/
+
+# Disposable test and installer output
+tests/tmp*/
+tests/vision-http-*/
+pip-build-tracker-*/
+pip-ephem-wheel-cache-*/
+pip-install-*/
+pip-unpack-*/

@@ -1,0 +1,110 @@
+{
+  "method": "Read-only existing checkpoints. Sum duration_ms only where recorded; omitted durations are not zero. CAD job wall time includes queueing and worker startup. No new remote model calls.",
+  "tasks": [
+    {
+      "task_id": "c2a9df50bb3b4044bf160ce6582d987d",
+      "state": "completed",
+      "timed_model_calls": 45,
+      "timed_model_seconds": 959.155,
+      "input_tokens": 762912,
+      "output_tokens": 214657,
+      "tools": {
+        "model_protocol_rejected": 4,
+        "native_api": 5,
+        "set_modeling_requirements": 5,
+        "build_geometry": 5,
+        "list_topology": 5,
+        "check_modeling": 8,
+        "preview_build": 7,
+        "model_request": 2,
+        "read_script": 5,
+        "inspect_geometry": 4,
+        "finish": 1
+      },
+      "cad_jobs": [
+        {
+          "state": "succeeded",
+          "queue_and_execution_seconds": 2.554
+        },
+        {
+          "state": "succeeded",
+          "queue_and_execution_seconds": 7.158
+        },
+        {
+          "state": "succeeded",
+          "queue_and_execution_seconds": 9.506
+        },
+        {
+          "state": "succeeded",
+          "queue_and_execution_seconds": 5.109
+        },
+        {
+          "state": "succeeded",
+          "queue_and_execution_seconds": 5.101
+        }
+      ]
+    },
+    {
+      "task_id": "c638e484727d4e53952fe136daf68f45",
+      "state": "completed",
+      "timed_model_calls": 40,
+      "timed_model_seconds": 967.778,
+      "input_tokens": 667288,
+      "output_tokens": 187831,
+      "tools": {
+        "native_api": 4,
+        "set_modeling_requirements": 3,
+        "build_geometry": 5,
+        "model_request": 3,
+        "preview_build": 5,
+        "read_script": 9,
+        "model_protocol_rejected": 4,
+        "read_tool_result": 6,
+        "list_topology": 4,
+        "check_modeling": 3,
+        "finish": 1
+      },
+      "cad_jobs": [
+        {
+          "state": "succeeded",
+          "queue_and_execution_seconds": 1.209
+        },
+        {
+          "state": "succeeded",
+          "queue_and_execution_seconds": 1.57
+        },
+        {
+          "state": "succeeded",
+          "queue_and_execution_seconds": 3.053
+        },
+        {
+          "state": "succeeded",
+          "queue_and_execution_seconds": 4.573
+        },
+        {
+          "state": "failed",
+          "queue_and_execution_seconds": 1.199
+        }
+      ]
+    },
+    {
+      "task_id": "cb0de12b26b245b383d2169c0bbb92d0",
+      "state": "completed",
+      "timed_model_calls": 11,
+      "timed_model_seconds": 32.231,
+      "input_tokens": 90539,
+      "output_tokens": 1444,
+      "tools": {
+        "native_api": 9,
+        "build_geometry": 1,
+        "finish": 1
+      },
+      "cad_jobs": [
+        {
+          "state": "succeeded",
+          "queue_and_execution_seconds": 0.845
+        }
+      ]
+    }
+  ]
+}

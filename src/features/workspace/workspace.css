@@ -55,7 +55,3 @@
 .core-tasks { margin-bottom: 16px; }
 @media (max-width: 1150px) { .core-layout { grid-template-columns: 300px minmax(0, 1fr); } .core-jobs { grid-column: 1 / -1; } .core-main { padding-right: 20px; } }
 @media (max-width: 700px) { .core-layout { display: flex; flex-direction: column; } .core-layout > * { width: 100%; } .core-main { padding: 0 16px; } .core-workspace header { flex-wrap: wrap; padding: 18px; gap: 12px; } .core-workspace header a { margin-left: 0; } }
-
-
-
-

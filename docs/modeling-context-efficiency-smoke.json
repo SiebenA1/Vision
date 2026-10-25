@@ -1,0 +1,47 @@
+{
+  "method": "Read-only replay of saved checkpoints. Source view frozen at checkpoint time; same saved retrieval candidates. No remote requests or project changes. Character counts are not provider token counts or measured latency.",
+  "checkpoints": [
+    {
+      "ordinal": 9,
+      "context_before_characters": 23524,
+      "context_after_characters": 21080,
+      "request_before_characters": 51485,
+      "request_after_characters": 50315,
+      "full_api_pages": 0,
+      "offered_tools_before": 18,
+      "offered_tools_after": 18,
+      "reasoning_before": "high",
+      "reasoning_after": "low",
+      "current_request_preserved": true,
+      "requirements_preserved": true
+    },
+    {
+      "ordinal": 19,
+      "context_before_characters": 23552,
+      "context_after_characters": 18288,
+      "request_before_characters": 51599,
+      "request_after_characters": 32838,
+      "full_api_pages": 0,
+      "offered_tools_before": 19,
+      "offered_tools_after": 4,
+      "reasoning_before": "high",
+      "reasoning_after": "low",
+      "current_request_preserved": true,
+      "requirements_preserved": true
+    },
+    {
+      "ordinal": 22,
+      "context_before_characters": 23552,
+      "context_after_characters": 18585,
+      "request_before_characters": 51550,
+      "request_after_characters": 47466,
+      "full_api_pages": 0,
+      "offered_tools_before": 18,
+      "offered_tools_after": 18,
+      "reasoning_before": "high",
+      "reasoning_after": "low",
+      "current_request_preserved": true,
+      "requirements_preserved": true
+    }
+  ]
+}

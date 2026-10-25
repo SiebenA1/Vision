@@ -1,0 +1,76 @@
+{
+  "meaning": "PASS = defect reproduced; no fixes applied",
+  "results": [
+    {
+      "id": "F01",
+      "reproduced": true,
+      "evidence": "8000-character latest read_script receipt omitted",
+      "tool_layer": {
+        "allocated_characters": 7059,
+        "used_characters": 0,
+        "omitted_entries": 1
+      }
+    },
+    {
+      "id": "F02",
+      "reproduced": true,
+      "evidence": "current message selection absent from entire compiled context",
+      "message_layer": {
+        "allocated_characters": 2581,
+        "used_characters": 115,
+        "omitted_entries": 1
+      }
+    },
+    {
+      "id": "F03",
+      "reproduced": true,
+      "evidence": "dependent old-thickness memory stays applicable after ancestor superseded"
+    },
+    {
+      "id": "F04",
+      "reproduced": true,
+      "evidence": "inactive memory replayed inside previous search_sources receipt"
+    },
+    {
+      "id": "F05a",
+      "reproduced": true,
+      "evidence": "failed CAD turn and error omitted from next context"
+    },
+    {
+      "id": "F05b",
+      "reproduced": true,
+      "evidence": "native failure pauses task instead of returning failure to planner"
+    },
+    {
+      "id": "F06",
+      "reproduced": true,
+      "evidence": "12 previews do not activate progress watchdog",
+      "progress": {
+        "api_lookups_since_progress": 0,
+        "consecutive_uninformative_lookups": 0,
+        "protocol_rejections_since_progress": 0,
+        "ready_to_build": false,
+        "recovery_required": false,
+        "meaning": "Preparation watchdog, not a cumulative request budget. Reuse known signatures and build, or explain the concrete missing capability."
+      }
+    },
+    {
+      "id": "F07",
+      "reproduced": true,
+      "evidence": "model can finish with modeling-complete summary while geometry is null"
+    },
+    {
+      "id": "F09",
+      "reproduced": true,
+      "evidence": "8 empty native_api calls keep executing despite recovery_required=true",
+      "provider_calls": 8
+    },
+    {
+      "id": "F08",
+      "reproduced": true,
+      "evidence": "reranker receives only prefix and loses final current-target instruction",
+      "original_query_characters": 358,
+      "reranker_query_characters": 320
+    }
+  ]
+}

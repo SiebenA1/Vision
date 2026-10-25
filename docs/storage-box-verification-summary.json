@@ -1,0 +1,111 @@
+{
+  "artifact_id": "ef0a3b3c56b17a418d858b0506c2dcdded1563a158969b1c7b1240cbb120cf36",
+  "bodies": [
+    {
+      "id": "body-0",
+      "name": "box_body",
+      "kind": "solid",
+      "manifold": true,
+      "bbox_mm": {
+        "max": [
+          120.00002,
+          80.00002,
+          40.000020000000006
+        ],
+        "min": [
+          -2e-05,
+          -2e-05,
+          -2e-05
+        ],
+        "size": [
+          120.00004000000001,
+          80.00004000000001,
+          40.000040000000006
+        ]
+      },
+      "volume_mm3": 71867.99999999994,
+      "area_mm2": 49112.0,
+      "face_count": 11,
+      "edge_count": 24,
+      "bbox_inferred_face_levels_mm": {
+        "x": [
+          0.0,
+          3.0,
+          117.0,
+          120.0
+        ],
+        "y": [
+          0.0,
+          3.0,
+          77.0,
+          80.0
+        ],
+        "z": [
+          0.0,
+          3.0,
+          40.0
+        ]
+      },
+      "face_levels_truncated": false
+    },
+    {
+      "id": "body-1",
+      "name": "lid",
+      "kind": "solid",
+      "manifold": true,
+      "bbox_mm": {
+        "max": [
+          122.80002,
+          82.80002,
+          85.00002
+        ],
+        "min": [
+          -2.80002,
+          -2.80002,
+          69.99998
+        ],
+        "size": [
+          125.60004,
+          85.60004,
+          15.000040000000013
+        ]
+      },
+      "volume_mm3": 44626.07999999999,
+      "area_mm2": 32667.519999999997,
+      "face_count": 11,
+      "edge_count": 24,
+      "bbox_inferred_face_levels_mm": {
+        "x": [
+          -2.8,
+          -0.3,
+          120.3,
+          122.8
+        ],
+        "y": [
+          -2.8,
+          -0.3,
+          80.3,
+          82.8
+        ],
+        "z": [
+          70.0,
+          82.0,
+          85.0
+        ]
+      },
+      "face_levels_truncated": false
+    }
+  ],
+  "body_count": 2,
+  "scope": "Measured body metrics and bbox-inferred face levels; not proof of wall thickness, fit, clearance or topology continuity.",
+  "bbox_relation": {
+    "a": "body-0",
+    "b": "body-1",
+    "axis_gaps_mm": {
+      "x": 0,
+      "y": 0,
+      "z": 29.999959999999987
+    }
+  },
+  "bodies_truncated": false
+}

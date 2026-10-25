@@ -1,0 +1,68 @@
+{
+  "schema": "vision.code-channel-acceptance/1",
+  "remote_model_requests": 0,
+  "scope": "Actual local CAD geometry and mesh; not visual or mechanical feature certification",
+  "cases": [
+    {
+      "case": "initial",
+      "wall_seconds": 1.935,
+      "rebuilt": [
+        "body",
+        "lid"
+      ],
+      "reused": [],
+      "mesh_reused": [],
+      "body_count": 2,
+      "body_height_mm": 40.000040000000006,
+      "lid_min_z_mm": 69.99998
+    },
+    {
+      "case": "body_height_40_to_50",
+      "wall_seconds": 2.11,
+      "rebuilt": [
+        "body"
+      ],
+      "reused": [
+        "lid"
+      ],
+      "mesh_reused": [
+        "lid"
+      ],
+      "body_count": 2,
+      "body_height_mm": 50.000040000000006,
+      "lid_min_z_mm": 79.99998
+    },
+    {
+      "case": "lid_rotation_only",
+      "wall_seconds": 1.911,
+      "rebuilt": [],
+      "reused": [
+        "body",
+        "lid"
+      ],
+      "mesh_reused": [
+        "body",
+        "lid"
+      ],
+      "body_count": 2,
+      "body_height_mm": 50.000040000000006,
+      "lid_min_z_mm": 79.99998
+    },
+    {
+      "case": "mesh_tolerance_change",
+      "wall_seconds": 1.683,
+      "rebuilt": [],
+      "reused": [
+        "body",
+        "lid"
+      ],
+      "mesh_reused": [],
+      "body_count": 2,
+      "body_height_mm": 50.000040000000006,
+      "lid_min_z_mm": 79.99998
+    }
+  ],
+  "search_payload_characters": 1504,
+  "source_code_in_search": false,
+  "status": "passed"
+}

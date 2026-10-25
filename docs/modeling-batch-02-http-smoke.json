@@ -1,0 +1,7 @@
+{
+  "health": true,
+  "conversation_completion_status": "not_built",
+  "project_create_status": 201,
+  "remote_model_calls": 0,
+  "workspace": "disposable"
+}

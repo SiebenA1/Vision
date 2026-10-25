@@ -115,7 +115,7 @@ npm run build
 python -m unittest discover -s tests -p "test_*.py"
 python scripts/test_native_engineering.py --cad-only
 .python313/python.exe scripts/test_native_engineering.py
-npm run test:native-ui
+npm run test:core-ui
 ```
 
 原生 CAD 测试调用实际 USD BRep 1.0.0：布尔、拉伸、旋转、路径扫掠、实体放样、圆角、倒角、抽壳、偏置、缝合/修复、片体、NURBS 裁剪、多体、原生往返、增量编辑、参数重放与面查询。

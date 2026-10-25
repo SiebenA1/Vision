@@ -61,4 +61,3 @@
 .desktop-workspace .core-layout { grid-column: 2; display: grid; grid-template-columns: minmax(0, 1fr) var(--chat-width); min-width: 0; min-height: 0; overflow: hidden; position: relative; }
 .desktop-workspace.chat-hidden .core-layout, .desktop-workspace.empty-workspace .core-layout { grid-template-columns: minmax(0, 1fr); }
 .desktop-workspace.chat-hidden .conversation-panel { display: none; }
-

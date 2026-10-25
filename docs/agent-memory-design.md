@@ -1,3 +1,5 @@
+> 历史设计：本文描述已退役的 v1 前端。旧代码路径仅作为历史记录，当前实现见 [核心代码图](core-code-map.md)。
+
 # VISION 工程 Agent 记忆系统设计报告
 
 版本：评审稿 v1.1 · 日期：2026-10-20
@@ -27,7 +29,7 @@
 
 工程库目前保存在浏览器 localStorage，后端保存原生制品。新设计必须明确迁移后的版本权威，不能另造一份会与前端悄悄分叉的“当前工程”。
 
-代码依据：[主聊天](../src/services/deepseekAgent.ts)、[工程上下文](../src/core/llm/tools.ts)、[几何解读](../src/services/selectionAnalysis.ts)、[工程持久化](../src/core/projects.ts)、[测量状态](../src/state/inspectionStore.ts)。
+代码依据：主聊天（历史路径 `src/services/deepseekAgent.ts`）、工程上下文（历史路径 `src/core/llm/tools.ts`）、几何解读（历史路径 `src/services/selectionAnalysis.ts`）、工程持久化（历史路径 `src/core/projects.ts`）、测量状态（历史路径 `src/state/inspectionStore.ts`）。
 
 ## 3. 借鉴的近期设计与取舍
 

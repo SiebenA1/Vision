@@ -1,0 +1,23 @@
+{
+  "ranking": [
+    "螺栓把安装耳紧固在墙面",
+    "外观喷漆使用蓝色"
+  ],
+  "metadata": {
+    "embedding": "BAAI/bge-small-zh-v1.5",
+    "reranker": "BAAI/bge-reranker-v2-m3-int8",
+    "local_only": true,
+    "models_ready": true,
+    "cache_present": true,
+    "vector_database": "Qdrant local; SQLite persists rebuildable vectors",
+    "mode": "hybrid_reranked",
+    "degraded_reason": null,
+    "candidate_chunks": 2,
+    "lexical_hits": 1,
+    "dense_hits": 2,
+    "reranked_chunks": 2,
+    "returned_sources": 2,
+    "result_cache_hit": false,
+    "duration_ms": 6556.03
+  }
+}

@@ -2,6 +2,17 @@
 
 Updated 2026-10-19. The engineering loop is intent → editable native geometry → explicit study → deterministic calculation → evidence → revision.
 
+The sections below describe the historical v1 workbench; its unused React UI has
+been removed. The current entry and retained dependencies are documented in
+[the core code map](core-code-map.md). The active v2 core is
+documented in [backend/README.md](../backend/README.md) and
+[development status](development-status.md). It now has persistent revisions,
+native jobs and local explicit task plans with checkpoint recovery, epoch-fenced
+corrections and project-scoped source retrieval. DeepSeek mode now chooses one
+typed tool at a time, persisting provider receipts before executing engineering
+commands. Its transport scope and budgets are in [model connection](model-connection.md);
+v1's conversational Agent remains separate.
+
 ## Runtime responsibilities
 
 | Layer | Responsibility |
@@ -27,7 +38,7 @@ Geometry and study identities are separate. Native SHA-256, artifact identity, p
 
 Numerical responses validate dimensions, finite fields and solver evidence before adoption. Unsupported evidence remains nullable. Results project only onto surfaces participating in the solve. Reports carry the native source identity, study, boundary counts, applied forces and actual available numerical evidence.
 
-Large systems use batched assembly and Jacobi-preconditioned CG instead of direct factorization, with actual algorithm and iteration metadata. Numerical job admission is serialized, worker execution has a 600-second budget, and the proxy waits longer than the worker. These latest changes remain untested at the user's request; prior numerical measurements do not validate the new iterative path.
+Large systems use batched assembly and Jacobi-preconditioned CG instead of direct factorization, with actual algorithm and iteration metadata. Numerical job admission is serialized, worker execution has a 600-second budget, and the proxy waits longer than the worker. On 2026-10-23, the current direct and CG paths passed real numerical regression, including 166,316 elements / 92,931 DOFs and 2,155 CG iterations. See [current CAE validation](cae-validation.md) for results and limits; timeout/admission failures were not deliberately triggered.
 
 ## Remaining limits
 

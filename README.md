@@ -35,6 +35,42 @@ The worker supplies `u`, `parameters`, and imported `parts`. Final results must 
 
 See [the integration contract](docs/usd-brep-integration.md) for API coverage, source replay, topology lifetimes, cavity seeds and limitations; [architecture](docs/architecture.md) and [engineering method](docs/engineering-method.md) describe implementation and evidence.
 
+See [the current core code map](docs/core-code-map.md) for the active workspace entry, backend responsibilities and legacy-code cleanup boundaries.
+
+The [development plan](docs/development-plan.md) defines the roadmap. The
+[development status](docs/development-status.md) distinguishes implemented v2
+features from remaining acceptance work.
+
+## New engineering workspace (development preview)
+
+The current application uses the durable engineering core and a single desktop-style workspace:
+
+```powershell
+.python313/python.exe -m pip --disable-pip-version-check install -r backend/requirements.txt
+npm run core
+# In a second terminal:
+npm run dev
+```
+
+Open `http://127.0.0.1:4173/`. This workspace persists project
+revisions, native CAD/FEA jobs and artifacts in `.vision-workspace`. It includes
+explicit study settings, requirements with source records, numerical assessment,
+reports, semantic object bindings, version restoration and full project bundles.
+It rejects stale writes and invalidated native face bindings. Closing the page
+does not cancel a submitted job. See [core instructions](backend/README.md).
+
+The header has **建模**, **CAE 仿真** and **解析校核** views with the same project
+navigation, theme and assistant sidebar. CAE uses the current project's saved
+material, supports, loads and mesh; the verification view provides independent
+beam formulas and persistent production-solver checks, including mesh refinement
+and same-grid Direct/CG comparison. See [current accuracy results](docs/cae-validation.md):
+coarse P1 bending meshes can have large displacement errors despite tiny residuals.
+
+The root URL is the only workbench entry. Saved `?workspace=v2` and former
+prototype links resolve to this same application. The independent prototype
+page has been removed. The sections below describe legacy v1 APIs unless stated
+otherwise; legacy browser data can be explicitly imported using the workbench.
+
 ## HTTP API
 
 | Endpoint | Purpose |
@@ -52,16 +88,31 @@ See [the integration contract](docs/usd-brep-integration.md) for API coverage, s
 ```powershell
 npm test
 npm run build
-python -m unittest discover -s tests -p "test_*.py"
-.python313/python.exe scripts/test_native_engineering.py
-npm run test:native-ui
+npm run test:python
+npm run test:measurements
+npm run test:native
 npm run test:backend
+npm run test:core-ui
 ```
 
-The real native suite covers 13 CAD operation families, multi-body replay, parameters, trimmed-face queries, axial elasticity, additive forces, enclosed cavities and a flow-manifold static solve. The native browser suite requires local Microsoft Edge; it starts its own loopback backend and Vite server on ports 8115 and 4175. It verifies native face selection, multiple loads, real FEM results, annotations and readable layouts at three widths. The [twisted blade](server/examples/twisted_blade_usd.py) and [flow manifold](server/examples/flow_manifold_usd.py) are replayable engineering examples, not certified designs or default presets.
+`test:core-ui` uses a disposable workspace and local Microsoft Edge to verify
+project creation, real CAD, saved study settings, real FEA, reload and responsive
+layout. It starts its own backend and Vite server on ports 8116 and 4177.
+Python suites retain regression coverage for the durable core, conversation,
+modeling recovery, memory, topology, artifact publication and solver contracts.
+Set `VISION_TEST_NATIVE_CORE=1` to include the opt-in native lifecycle and solver
+checks. No test command above calls a remote language model by default.
+
+The native suite covers 13 CAD operation families, multi-body replay, parameters,
+trimmed-face queries, axial elasticity, additive forces, enclosed cavities and a
+flow-manifold static solve. Replayable examples live in `server/examples/`.
+See [cleanup boundaries and retained checks](docs/project-cleanup.md).
 
 ## Boundaries
 
+Current direct and CG numerical verification, installed runtime versions and
+reproduction commands are recorded in [CAE validation](docs/cae-validation.md).
+
 Public API access does not mean every input or every API combination is validated. Current physics is homogeneous isotropic linear static elasticity with solid tetrahedra. Sheets are modeled and displayed but cannot use shell analysis. There is no assembly mating, automatic contact/bonding, plasticity, fatigue, buckling, modal analysis or CFD. Native face references must be rebound after geometry changes. Package export contains geometry artifacts; export project JSON separately for current application settings.
 
-Large previews are restored from backend artifacts rather than localStorage. Results and chat are not persisted. Client cancellation discards late responses but does not kill server jobs. The backend executes local Python with the user's authority and must remain bound to loopback.
+The durable core persists projects, jobs, results and conversations in `.vision-workspace`; browser editor drafts remain local. Cancellation and recovery are managed by the core controller. Native workers execute local Python with the user's authority; services must remain bound to loopback.

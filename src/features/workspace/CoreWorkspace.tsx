@@ -565,5 +565,3 @@ export default function CoreWorkspace() {
     </div>
   </main>;
 }
-
-

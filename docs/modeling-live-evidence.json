@@ -1,0 +1,308 @@
+{
+  "read_only": true,
+  "captured_date": "2026-10-25",
+  "source": ".vision-workspace/workspace.sqlite3",
+  "caveat": "Historical requests may predate current fixes; counts do not establish current-version failure rates.",
+  "turns": [
+    {
+      "tool": "ask_user",
+      "state": "succeeded",
+      "n": 3
+    },
+    {
+      "tool": "build_geometry",
+      "state": "failed",
+      "n": 5
+    },
+    {
+      "tool": "build_geometry",
+      "state": "succeeded",
+      "n": 2
+    },
+    {
+      "tool": "finish",
+      "state": "succeeded",
+      "n": 2
+    },
+    {
+      "tool": "list_topology",
+      "state": "succeeded",
+      "n": 9
+    },
+    {
+      "tool": "model_protocol_rejected",
+      "state": "rejected",
+      "n": 3
+    },
+    {
+      "tool": "model_request",
+      "state": "failed",
+      "n": 1
+    },
+    {
+      "tool": "native_api",
+      "state": "rejected",
+      "n": 1
+    },
+    {
+      "tool": "native_api",
+      "state": "succeeded",
+      "n": 59
+    },
+    {
+      "tool": "preview_build",
+      "state": "rejected",
+      "n": 1
+    },
+    {
+      "tool": "preview_build",
+      "state": "succeeded",
+      "n": 21
+    },
+    {
+      "tool": "read_script",
+      "state": "succeeded",
+      "n": 12
+    },
+    {
+      "tool": "remember",
+      "state": "succeeded",
+      "n": 2
+    },
+    {
+      "tool": "search_sources",
+      "state": "succeeded",
+      "n": 1
+    }
+  ],
+  "jobs": [
+    {
+      "kind": "cad",
+      "state": "failed",
+      "n": 3
+    },
+    {
+      "kind": "cad",
+      "state": "succeeded",
+      "n": 3
+    },
+    {
+      "kind": "cad",
+      "state": "timed_out",
+      "n": 1
+    },
+    {
+      "kind": "fea",
+      "state": "succeeded",
+      "n": 2
+    }
+  ],
+  "epochs": [
+    {
+      "epoch": 1,
+      "steps": 7,
+      "api_lookups": 6,
+      "previews": 0
+    },
+    {
+      "epoch": 2,
+      "steps": 5,
+      "api_lookups": 4,
+      "previews": 0
+    },
+    {
+      "epoch": 3,
+      "steps": 11,
+      "api_lookups": 5,
+      "previews": 0
+    },
+    {
+      "epoch": 4,
+      "steps": 2,
+      "api_lookups": 0,
+      "previews": 0
+    },
+    {
+      "epoch": 5,
+      "steps": 4,
+      "api_lookups": 3,
+      "previews": 0
+    },
+    {
+      "epoch": 6,
+      "steps": 14,
+      "api_lookups": 4,
+      "previews": 2
+    },
+    {
+      "epoch": 7,
+      "steps": 23,
+      "api_lookups": 13,
+      "previews": 3
+    },
+    {
+      "epoch": 8,
+      "steps": 7,
+      "api_lookups": 1,
+      "previews": 2
+    },
+    {
+      "epoch": 9,
+      "steps": 25,
+      "api_lookups": 6,
+      "previews": 11
+    },
+    {
+      "epoch": 10,
+      "steps": 13,
+      "api_lookups": 8,
+      "previews": 3
+    }
+  ],
+  "latest_task": {
+    "id": "cc9751452cfd4a178316a2c06f492571",
+    "epoch": 10,
+    "state": "waiting_user",
+    "turns": 13,
+    "jobs": 1,
+    "error": "task native job did not succeed: native attempt exceeded its execution budget",
+    "context": {
+      "budget_characters": 24000,
+      "characters": 18947,
+      "estimated_text_tokens_upper_bound": 20449,
+      "layers": {
+        "cad_api_reference": {
+          "allocated_characters": 3683,
+          "omitted_entries": 31,
+          "used_characters": 3239
+        },
+        "cad_api_signatures": {
+          "allocated_characters": 2071,
+          "omitted_entries": 25,
+          "used_characters": 2058
+        },
+        "conversation_messages": {
+          "allocated_characters": 3223,
+          "omitted_entries": 0,
+          "used_characters": 1749
+        },
+        "historical_sources": {
+          "allocated_characters": 2302,
+          "omitted_entries": 3,
+          "used_characters": 2290
+        },
+        "long_term_memory": {
+          "allocated_characters": 3453,
+          "omitted_entries": 0,
+          "used_characters": 1437
+        },
+        "recent_tool_groups": {
+          "allocated_characters": 6906,
+          "omitted_entries": 51,
+          "used_characters": 6879
+        },
+        "stage_memory": {
+          "allocated_characters": 1381,
+          "omitted_entries": 1,
+          "used_characters": 0
+        }
+      },
+      "payload_sha256": "1ad3ff6ceb71674d9cf310e02655cd118812463d0d409f528b2eb05df81efcb9",
+      "phase": "modeling",
+      "reserved_tokens": 51487,
+      "retrieval": {
+        "cache_present": true,
+        "candidate_chunks": 19,
+        "degraded_reason": null,
+        "dense_hits": 19,
+        "duration_ms": 21.95,
+        "embedding": "BAAI/bge-small-zh-v1.5",
+        "lexical_hits": 17,
+        "local_only": true,
+        "mode": "hybrid_reranked",
+        "models_ready": true,
+        "reranked_chunks": 19,
+        "reranker": "BAAI/bge-reranker-v2-m3-int8",
+        "result_cache_hit": true,
+        "returned_sources": 6,
+        "vector_database": "Qdrant local; SQLite persists rebuildable vectors"
+      },
+      "sha256": "a647403440711cfefe841a5acded1330ffb2c5f5f49f160b04db2d5d7b57d7e0",
+      "source_ids": [
+        "0c0c0688050f4de688c99fd003a10855",
+        "10bb4915dc5955ff830549de9ddbcf7e",
+        "1a7f792d2839444d9c48309587743c30",
+        "244dc8f994404be2ab85b7d7bec3f776",
+        "3a2097bd74684461b8ab26ba409394c1",
+        "3c0a01d96f014b0384f4109607628577",
+        "53d231a61e684b2491eaa434d34961c1",
+        "6bfb2d5102ac49caad70ead1b35159cd",
+        "6cb02eb07ffd41e09b88baccb3390e6e",
+        "89c925226aec4bc098661f408a40fa2f",
+        "af763ccbb72d43e1aeda015b5d491d5e",
+        "bd1869dcf8c54920b65de6ef76bbd6fb",
+        "c30d71eed9ba487685857caa2c7b0438",
+        "c800403bfe6f42bf9dc2f1cf1c98160a",
+        "d962bb8555ba4e93abae8a2410fc1263",
+        "fa8c225b1293491d99a28c7c889bc191"
+      ],
+      "token_estimate_method": "utf8_bytes_not_provider_tokenizer"
+    }
+  },
+  "confirmation_context_loss": [
+    {
+      "epoch": 6,
+      "ordinal": 7,
+      "statement": "是",
+      "groups": [
+        {
+          "tool": "list_topology",
+          "epoch": 3
+        },
+        {
+          "tool": "list_topology",
+          "epoch": 3
+        },
+        {
+          "tool": "ask_user",
+          "epoch": 3
+        },
+        {
+          "tool": "remember",
+          "epoch": 4
+        },
+        {
+          "tool": "ask_user",
+          "epoch": 5
+        },
+        {
+          "tool": "native_api",
+          "epoch": 6
+        },
+        {
+          "tool": "native_api",
+          "epoch": 6
+        },
+        {
+          "tool": "build_geometry",
+          "epoch": 6
+        }
+      ]
+    },
+    {
+      "epoch": 6,
+      "ordinal": 13,
+      "statement": "是",
+      "groups": [
+        {
+          "tool": "list_topology",
+          "epoch": 6
+        },
+        {
+          "tool": "read_script",
+          "epoch": 6
+        }
+      ]
+    }
+  ]
+}

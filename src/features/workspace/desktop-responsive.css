@@ -29,4 +29,3 @@
   .desktop-workspace .core-results dl { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .core-field-legend { left: 12px; right: 12px; max-width: none; top: 62px; bottom: auto; }
 }
-
