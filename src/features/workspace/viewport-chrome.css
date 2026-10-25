@@ -1,0 +1,58 @@
+/* One toolbar over the canvas, one shared footer below it. */
+.desktop-workspace .model-stage { position: relative; }
+.viewport-object-list { position: absolute; z-index: 6; top: 54px; left: 10px; width: min(300px, calc(100% - 20px)); max-height: calc(100% - 110px); overflow-y: auto; padding: 12px; border: 1px solid var(--line-strong); border-radius: 9px; background: var(--panel); box-shadow: 0 8px 25px #00000020; font-size: 11px; }
+.viewport-object-list .core-modal-heading { align-items: center; margin-bottom: 10px; }
+.desktop-workspace .viewport-object-list .core-modal-heading button { padding: 3px; border: 0; background: transparent; }
+.desktop-workspace .viewport-object-list select { font-size: 11px; }
+.viewport-object-list p { color: var(--muted); line-height: 1.7; }
+.desktop-workspace .viewport-object-list > button { font-size: 11px; padding: 6px; margin: 2px; }
+.selection-actions { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); }
+.selection-actions > summary { cursor: pointer; }
+.desktop-workspace .selection-actions label { margin-top: 10px; font-size: 11px; }
+.desktop-workspace .selection-actions :is(input, textarea) { font-size: 12px; }
+.desktop-workspace .selection-actions button { margin: 4px 4px 4px 0; }
+.workspace-advanced { position: relative; }
+.workspace-advanced > summary { display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 6px; cursor: pointer; list-style: none; color: var(--muted); }
+.workspace-advanced > summary::-webkit-details-marker { display: none; }
+.workspace-advanced > summary:hover { background: var(--hover); color: var(--ink); }
+.workspace-advanced > div { position: absolute; z-index: 30; top: calc(100% + 8px); right: 0; min-width: 150px; padding: 5px; background: var(--panel); border: 1px solid var(--line-strong); border-radius: 8px; box-shadow: 0 8px 25px #00000020; }
+.desktop-workspace .workspace-advanced button { width: 100%; text-align: left; border: 0; background: transparent; }
+.desktop-workspace .script-dialog { width: min(880px, calc(100vw - 32px)); }
+.script-dialog > p { color: var(--muted); font-size: 12px; }
+.desktop-workspace .script-dialog .manual-modeling { padding: 0; }
+.desktop-workspace .script-dialog .manual-modeling > button { margin: 4px 6px 8px 0; }
+@media (max-width: 1000px) { .object-list-open .core-pick-overlay { display: none; } }
+.desktop-workspace .viewport-toolbar { position: absolute; z-index: 5; top: 10px; left: 10px; display: flex; align-items: center; gap: 4px; width: max-content; max-width: calc(100% - 20px); padding: 4px; border: 1px solid var(--line-strong); border-radius: 9px; background: var(--panel); box-shadow: 0 2px 10px #0000000a; }
+.desktop-workspace .viewport-toolbar > select { width: auto; max-width: 122px; min-height: 28px; margin: 0; padding: 4px 22px 4px 8px; border: 0; border-radius: 5px; background-color: transparent; color: var(--ink); font-size: 11px; }
+.desktop-workspace .viewport-toolbar > select:hover { background-color: var(--hover); }
+.viewport-mode-label { padding: 0 7px; color: var(--muted); font-size: 11px; white-space: nowrap; }
+.desktop-workspace .viewport-toolbar .viewport-icon { width: 28px; height: 28px; flex: 0 0 28px; padding: 0; border: 0; background: transparent; color: var(--muted); }
+.desktop-workspace .viewport-toolbar .viewport-icon:hover:not(:disabled) { color: var(--ink); background: var(--hover); }
+.desktop-workspace .viewport-deformation { display: flex; align-items: center; gap: 3px; margin: 0; font-size: 10px; color: var(--muted); white-space: nowrap; }
+.desktop-workspace .viewport-deformation input { width: 62px; min-height: 28px; margin: 0; padding: 4px; border: 0; border-radius: 5px; font-size: 11px; }
+.desktop-workspace .viewport-options { position: relative; margin: 0; padding: 0; border: 0; overflow: visible; flex: 0 0 28px; }
+.desktop-workspace .viewport-options > summary { display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; margin: 0; padding: 0; border-radius: 5px; color: var(--muted); cursor: pointer; list-style: none; }
+.viewport-options > summary::-webkit-details-marker { display: none; }
+.viewport-options > summary::marker { content: ''; }
+.viewport-options > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.desktop-workspace .viewport-options[open] > summary, .desktop-workspace .viewport-options > summary:hover { background: var(--hover); color: var(--ink); }
+.viewport-options-menu { position: absolute; right: 0; top: calc(100% + 9px); width: min(240px, calc(100vw - 100px)); padding: 12px; border: 1px solid var(--line-strong); border-radius: 9px; background: var(--panel); color: var(--ink); box-shadow: 0 8px 25px #00000020; }
+.viewport-options-menu > span { display: block; font-size: 10px; color: var(--muted); margin-bottom: 8px; }
+.viewport-presets { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; }
+.desktop-workspace .viewport-presets button { border: 1px solid var(--line); background: transparent; padding: 7px; font-size: 11px; }
+.desktop-workspace .viewport-options-menu label { display: flex; align-items: center; gap: 8px; margin: 12px 0; padding-top: 12px; border-top: 1px solid var(--line); font-size: 11px; }
+.desktop-workspace .viewport-options-menu input[type="checkbox"] { width: 13px; height: 13px; margin: 0; }
+.desktop-workspace .viewport-options-menu p { margin: 0; font-size: 10px; line-height: 1.8; color: var(--muted); }
+.desktop-workspace .core-pick-overlay { top: 56px; z-index: 3; padding: 8px 10px; box-shadow: none; }
+.desktop-workspace .core-axis-hud { width: 76px; left: 8px; bottom: 8px; }
+.desktop-workspace .core-axis-hud svg { width: 76px; height: 76px; }
+.desktop-workspace .core-axis-hud > span { display: none; }
+.desktop-workspace .core-ruler { width: 135px; right: 14px; bottom: 10px; font-size: 10px; }
+.desktop-workspace .core-ruler > div { margin-block: 4px 0; height: 5px; }
+.desktop-workspace .core-field-legend { top: 56px; }
+.desktop-workspace .core-viewport > p { top: 48px; }
+.desktop-workspace .workspace-bottom-tabs { gap: 14px; min-height: 33px; padding-inline: 12px; background: var(--paper); }
+.desktop-workspace .workspace-bottom-tabs > button { font-size: 10px; padding-block: 7px; }
+.workspace-model-status { margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 10px; }
+.desktop-workspace .workspace-bottom-tabs > .icon-button { margin-left: 0; }
+@media (max-width: 650px) { .desktop-workspace .workspace-bottom-tabs { gap: 9px; padding-inline: 8px; } .desktop-workspace .workspace-bottom-tabs > button { gap: 4px; } .workspace-model-status { font-size: 9px; } }

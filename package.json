@@ -11,14 +11,17 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:native-ui": "node scripts/native-ui-test.mjs",
-    "test:measurements": ".python312\\python.exe tests/test_cad_inspection.py",
-    "test:measurement-ui": "node scripts/measurement-ui-test.mjs",
-    "test:smart-inspection-ui": "node scripts/smart-inspection-ui-test.mjs",
+    "test:measurements": ".python312\\python.exe tests/native_cad_inspection.py",
     "test:agent-memory": ".python313\\python.exe tests/test_agent_memory.py",
-    "test:agent-memory-ui": "node scripts/agent-memory-ui-test.mjs",
     "test:backend": "node scripts/test_dev_backend.mjs",
-    "backend": "python scripts/run_backend.py"
+    "test:core": ".python313\\python.exe -m unittest discover -s tests -p test_workspace_v2.py",
+    "test:tasks": ".python313\\python.exe -m unittest discover -s tests -p test_tasks_v2.py",
+    "test:model-tasks": ".python313\\python.exe -m unittest discover -s tests -p test_model_tasks_v2.py",
+    "test:core-ui": "node scripts/core-ui-test.mjs",
+    "backend": "python scripts/run_backend.py",
+    "core": ".python313\\python.exe -m backend.vision",
+    "test:python": ".python313\\python.exe -m unittest discover -s tests -p test_*.py",
+    "test:native": ".python313\\python.exe scripts/test_native_engineering.py"
   },
   "engines": {
     "node": ">=20.19"
@@ -30,8 +33,7 @@
     "lucide-react": "^0.468.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
-    "three": "^0.180.0",
-    "zustand": "^5.0.2"
+    "three": "^0.180.0"
   },
   "devDependencies": {
     "@types/node": "^26.6.5",

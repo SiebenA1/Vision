@@ -1,0 +1,32 @@
+@media (max-width: 1100px) {
+  .desktop-workspace { --nav-width: 182px; }
+  .desktop-workspace.nav-collapsed { --nav-width: 60px; }
+  .revision-badge { display: none; }
+}
+@media (max-width: 900px) {
+  .desktop-workspace .core-layout { grid-template-columns: minmax(0, 1fr); }
+  .desktop-workspace .conversation-panel { position: absolute; right: 0; top: 0; bottom: 0; width: min(var(--chat-width), calc(100vw - var(--nav-width) - 18px)); z-index: 10; box-shadow: -12px 0 30px #00000018; }
+}
+@media (max-width: 650px) {
+  .desktop-workspace { --nav-width: 56px; }
+  .desktop-workspace .workspace-sidebar { padding-inline: 5px; }
+  .desktop-workspace .sidebar-brand { justify-content: center; padding: 0; }
+  .desktop-workspace .sidebar-brand > svg, .desktop-workspace .workspace-sidebar :is(strong, kbd), .desktop-workspace .workspace-sidebar button > span, .desktop-workspace .sidebar-section-label > span, .desktop-workspace .sidebar-connection > span:not(.status-dot), .desktop-workspace .sidebar-projects > p { display: none; }
+  .desktop-workspace .sidebar-brand .icon-button { margin: 0; }
+  .desktop-workspace .workspace-sidebar button { justify-content: center; }
+  .desktop-workspace .sidebar-section-label { padding: 0; justify-content: center; }
+  .desktop-workspace .sidebar-connection { padding: 12px 0; justify-content: center; }
+  .workspace-breadcrumb > span { max-width: 120px; }
+  .workspace-breadcrumb > strong, .workspace-breadcrumb > svg:last-of-type { display: none; }
+  .desktop-workspace > header.workspace-titlebar { padding-inline: 10px; }
+  .workspace-title-actions { gap: 2px; }
+  .workspace-settings[open] { grid-template-columns: 120px minmax(0, 1fr); }
+  .settings-navigation { padding: 20px 5px; }
+  .settings-navigation button { font-size: 10px; padding-inline: 6px; }
+  .settings-content { padding: 48px 16px 24px; }
+  .settings-content .settings-row { align-items: start; flex-direction: column; gap: 12px; }
+  .settings-content .settings-row select { width: 100%; }
+  .desktop-workspace .core-results dl { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .core-field-legend { left: 12px; right: 12px; max-width: none; top: 62px; bottom: auto; }
+}
+

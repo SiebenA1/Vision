@@ -1,0 +1,64 @@
+/* Desktop workbench: navigation / model canvas / persistent assistant. */
+.desktop-workspace {
+  --paper: #fff; --panel: #fff; --sidebar: #f7f7f8; --ink: #262626; --muted: #77777c;
+  --line: #e8e8ea; --line-strong: #d8d8dc; --accent: #343438; --accent-deep: #44444b;
+  --bad: #b83b40; --bad-soft: #fff0f0; --hover: #efeff1; --primary-bg: #262629; --primary-ink: #fff;
+  --nav-width: 216px; --chat-width: 380px; --canvas: #f0f2f5;
+  color-scheme: light; display: grid; grid-template-columns: var(--nav-width) minmax(0, 1fr); grid-template-rows: 52px minmax(0, 1fr);
+  height: 100dvh; overflow: hidden; background: var(--paper); font-size: 13px;
+}
+.desktop-workspace[data-theme="dark"] {
+  --paper: #202022; --panel: #242426; --sidebar: #19191b; --ink: #e9e9eb; --muted: #99999f;
+  --line: #333336; --line-strong: #45454b; --accent: #d0d0d6; --accent-deep: #c6c6ce; --hover: #303034;
+  --bad: #f28c90; --bad-soft: #452b2f; --primary-bg: #e7e7eb; --primary-ink: #202024; --canvas: #1c1e22;
+  color-scheme: dark;
+}
+.desktop-workspace.nav-collapsed { --nav-width: 60px; }
+.desktop-workspace button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; border-radius: 7px; padding: 7px 10px; margin: 0; color: var(--ink); font-size: 12px; transition: background .12s; }
+.desktop-workspace button:hover:not(:disabled) { background: var(--hover); }
+.desktop-workspace button.core-primary, .desktop-workspace button.chat-send { color: var(--primary-ink); background: var(--primary-bg); border-color: transparent; }
+.desktop-workspace button.core-primary:hover:not(:disabled), .desktop-workspace button.chat-send:hover:not(:disabled) { opacity: .85; background: var(--primary-bg); }
+.desktop-workspace .icon-button { width: 30px; height: 30px; padding: 5px; border-color: transparent; background: transparent; flex-shrink: 0; }
+.desktop-workspace :is(input, select, textarea) { font-size: 13px; border-radius: 7px; padding: 8px 10px; background: var(--paper); }
+.desktop-workspace :is(button, input, select, textarea, a):focus-visible { outline: 2px solid #769fdd; outline-offset: 2px; }
+.desktop-workspace p { line-height: 1.65; }
+.desktop-workspace [hidden] { display: none !important; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.status-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--muted); flex-shrink: 0; }
+.status-dot.online { background: #3ba67e; }
+.workspace-sidebar { grid-row: 1 / -1; background: var(--sidebar); border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; padding: 0 10px; }
+.sidebar-brand { height: 60px; flex-shrink: 0; display: flex; align-items: center; gap: 8px; padding: 0 6px; }
+.sidebar-brand strong { letter-spacing: .10em; font-size: 14px; font-weight: 600; }
+.sidebar-brand .icon-button { margin-left: auto; color: var(--muted); }
+.sidebar-actions { display: grid; gap: 3px; margin: 8px 0 28px; }
+.workspace-sidebar button { border-color: transparent; background: transparent; text-align: left; justify-content: start; min-height: 34px; padding: 8px 10px; }
+.sidebar-actions kbd { margin-left: auto; font-family: inherit; color: var(--muted); font-size: 10px; }
+.sidebar-section-label { display: flex; align-items: center; justify-content: space-between; padding-left: 10px; color: var(--muted); font-size: 11px; }
+.sidebar-projects { flex: 1; min-height: 0; overflow-y: auto; padding-top: 6px; }
+.sidebar-projects button { width: 100%; gap: 9px; margin-bottom: 3px; }
+.sidebar-projects button > span:first-of-type { text-overflow: ellipsis; overflow: hidden; white-space: nowrap; }
+.sidebar-projects button[aria-current="page"] { background: var(--hover); }
+.sidebar-projects button svg { flex-shrink: 0; color: var(--muted); }
+.project-indicator { width: 4px; height: 4px; background: var(--ink); border-radius: 50%; margin-left: auto; flex-shrink: 0; }
+.sidebar-projects > p { font-size: 12px; color: var(--muted); padding: 10px; }
+.sidebar-footer { display: grid; gap: 3px; padding: 12px 0; }
+.sidebar-connection { display: flex; align-items: center; gap: 8px; padding: 10px 12px 0; color: var(--muted); font-size: 11px; }
+.nav-collapsed .workspace-sidebar { padding-inline: 6px; }
+.nav-collapsed .sidebar-brand { justify-content: center; padding: 0; }
+.nav-collapsed .sidebar-brand > svg, .nav-collapsed .workspace-sidebar :is(strong, kbd), .nav-collapsed .workspace-sidebar button > span, .nav-collapsed .sidebar-section-label > span, .nav-collapsed .sidebar-connection > span:not(.status-dot), .nav-collapsed .sidebar-projects > p { display: none; }
+.nav-collapsed .sidebar-brand .icon-button { margin: 0; }
+.nav-collapsed .workspace-sidebar button { justify-content: center; }
+.nav-collapsed .sidebar-section-label { justify-content: center; padding: 0; }
+.nav-collapsed .sidebar-connection { justify-content: center; padding: 12px 0; }
+.desktop-workspace > header.workspace-titlebar { grid-column: 2; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 0 18px; height: 52px; border-bottom: 1px solid var(--line); background: var(--paper); }
+.workspace-breadcrumb { display: flex; align-items: center; gap: 10px; min-width: 0; font-size: 12px; }
+.workspace-breadcrumb > span { max-width: 230px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.workspace-breadcrumb > svg { color: var(--muted); flex-shrink: 0; }
+.desktop-workspace .workspace-breadcrumb > strong { font-size: 12px; font-weight: 500; }
+.workspace-title-actions { display: flex; align-items: center; gap: 7px; flex-shrink: 0; }
+.revision-badge { font-size: 10px; color: var(--muted); margin-right: 10px; font-family: var(--font-mono); }
+.desktop-workspace > .core-error { position: fixed; top: 56px; left: calc(var(--nav-width) + 16px); right: 16px; z-index: 22; border: 1px solid var(--bad); border-radius: 8px; display: flex; justify-content: space-between; gap: 16px; }
+.desktop-workspace .core-layout { grid-column: 2; display: grid; grid-template-columns: minmax(0, 1fr) var(--chat-width); min-width: 0; min-height: 0; overflow: hidden; position: relative; }
+.desktop-workspace.chat-hidden .core-layout, .desktop-workspace.empty-workspace .core-layout { grid-template-columns: minmax(0, 1fr); }
+.desktop-workspace.chat-hidden .conversation-panel { display: none; }
+

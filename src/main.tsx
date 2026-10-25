@@ -10,6 +10,17 @@ import './styles/projects.css';
 import './styles/workbench.css';
 import './styles/measurement.css';
 import { createRoot } from 'react-dom/client';
-import App from './App';
+import { lazy, Suspense } from 'react';
 
-createRoot(document.getElementById('root')!).render(<App />);
+const CoreWorkspace = lazy(() => import('./features/workspace/CoreWorkspace'));
+// Keep saved links usable while exposing a single canonical application entry.
+const entry = new URL(window.location.href);
+if (entry.searchParams.has('workspace') || entry.pathname === '/docs/conversation-workspace-prototype.html') {
+  entry.searchParams.delete('workspace');
+  entry.pathname = '/';
+  window.history.replaceState(window.history.state, '', entry.pathname + entry.search + entry.hash);
+}
+
+createRoot(document.getElementById('root')!).render(<Suspense fallback={<p>正在打开工程工作区…</p>}>
+  <CoreWorkspace />
+</Suspense>);

@@ -59,6 +59,12 @@ export default defineConfig(({ mode }) => {
   );
 
   const proxy = {
+    '/api/v2': {
+      target: process.env.VISION_CORE_URL || env.VISION_CORE_URL || 'http://127.0.0.1:8112',
+      changeOrigin: false,
+      timeout: 30_000,
+      proxyTimeout: 30_000,
+    },
     '/api/engineering': {
       target: engineeringTarget,
       changeOrigin: false,

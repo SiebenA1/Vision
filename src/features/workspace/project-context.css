@@ -1,0 +1,49 @@
+.engineering-memory { width: min(820px, calc(100vw - 32px)); }
+.engineering-memory .core-modal-heading { align-items: center; margin-bottom: 18px; }
+.engineering-memory .core-modal-heading h2 { font-size: 19px; margin: 0 0 7px; }
+.engineering-memory .core-modal-heading p { font-size: 12px; color: var(--muted); line-height: 1.7; margin: 0; }
+.memory-heading-actions, .memory-summary-bar, .memory-entry-heading, .memory-entry-actions, .memory-diagnostic-actions, .memory-editor-actions { display: flex; align-items: center; gap: 8px; }
+.memory-heading-actions { flex-shrink: 0; }
+.memory-summary-bar { justify-content: space-between; padding: 12px 0; border-block: 1px solid var(--line); }
+.memory-summary-bar > span, .memory-notice, .memory-empty { font-size: 11px; color: var(--muted); }
+.memory-project-state { display: flex; flex-direction: column; gap: 7px; margin-block: 12px; }
+.memory-project-state strong { font-size: 12px; }
+.memory-project-state span { font-size: 10px; color: var(--muted); }
+.memory-notice { padding: 10px 12px; background: var(--sidebar); border-radius: 7px; line-height: 1.7; }
+.engineering-memory .memory-section { padding: 16px 0 8px; }
+.engineering-memory .memory-section h3 { font-size: 12px; margin: 0 0 8px; display: flex; gap: 8px; align-items: center; }
+.memory-section h3 > span { font-size: 10px; color: var(--muted); font-weight: 400; }
+.memory-empty { margin: 8px 0 12px; line-height: 1.7; }
+.engineering-memory .memory-entry { border: 1px solid var(--line); border-radius: 8px; padding: 12px; margin-bottom: 9px; background: var(--panel); }
+.memory-entry-heading { justify-content: space-between; }
+.memory-entry-heading strong { font-size: 11px; font-weight: 500; }
+.memory-entry-heading > span { font-size: 10px; color: var(--muted); }
+.engineering-memory .memory-entry-text { font-size: 12px; line-height: 1.8; margin: 8px 0; white-space: pre-wrap; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; overflow: hidden; }
+.engineering-memory .memory-entry.is-expanded .memory-entry-text { display: block; }
+.memory-entry-actions { flex-wrap: wrap; }
+.desktop-workspace .memory-entry-actions button { border: 0; padding: 4px 6px; font-size: 10px; color: var(--muted); background: transparent; }
+.memory-provenance { padding-top: 8px; margin-top: 8px; border-top: 1px solid var(--line); }
+.memory-provenance p, .memory-provenance a { font-size: 10px; color: var(--muted); line-height: 1.7; }
+.memory-provenance a { display: inline-block; margin-right: 12px; }
+.engineering-memory .memory-editor { padding: 14px; background: var(--sidebar); border: 1px solid var(--line); border-radius: 9px; margin-block: 14px; }
+.engineering-memory .memory-editor h3 { font-size: 13px; margin: 0 0 14px; }
+.memory-form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.engineering-memory label { font-size: 11px; }
+.engineering-memory :is(select, textarea) { font-size: 12px; }
+.memory-editor > small { display: block; color: var(--muted); line-height: 1.7; font-size: 10px; }
+.memory-editor-actions { margin-top: 12px; }
+.engineering-memory :is(.memory-history,.memory-diagnostics) { border-top: 1px solid var(--line); padding-top: 12px; margin-top: 12px; }
+.engineering-memory summary { font-size: 11px; cursor: pointer; padding-block: 5px; }
+.engineering-memory :is(.memory-history,.memory-diagnostics) > p { font-size: 11px; color: var(--muted); line-height: 1.8; }
+.memory-diagnostic-actions { flex-wrap: wrap; margin-block: 12px; }
+.memory-context-summary { border: 1px solid var(--line); border-radius: 8px; padding: 12px; margin-block: 12px; font-size: 11px; }
+.memory-context-summary > p { font-size: 11px; line-height: 1.7; color: var(--muted); }
+.memory-context-summary dl > div { display: flex; justify-content: space-between; gap: 12px; padding-block: 6px; }
+.memory-context-summary dd { margin: 0; color: var(--muted); }
+.memory-context-summary pre { max-height: 220px; background: var(--sidebar); padding: 10px; border-radius: 6px; font-size: 10px; }
+.memory-forget { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
+.memory-forget > p { font-size: 11px; line-height: 1.7; color: var(--muted); }
+.desktop-workspace .memory-forget > button { color: var(--bad); }
+.desktop-workspace .chat-remember { display: block; border: 0; background: transparent; color: var(--muted); padding: 3px 0; font-size: 10px; opacity: .45; margin-top: 5px; }
+.conversation-message:hover .chat-remember, .conversation-message:focus-within .chat-remember { opacity: 1; }
+@media (max-width: 650px) { .memory-form-row { grid-template-columns: 1fr; gap: 0; } .memory-summary-bar { align-items: start; gap: 10px; } .memory-entry-heading { align-items: start; gap: 10px; } }

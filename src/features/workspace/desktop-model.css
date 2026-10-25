@@ -1,0 +1,40 @@
+.desktop-workspace .core-main { grid-column: 1; display: flex; flex-direction: column; padding: 0; height: 100%; overflow: hidden; min-height: 0; position: relative; }
+.model-stage { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.desktop-workspace .core-viewport { flex: 1; height: auto; min-height: 100px; border-radius: 0; background: var(--canvas); }
+.desktop-workspace .core-pick-overlay { top: 65px; max-width: min(280px, calc(100% - 24px)); padding: 10px 12px; background: var(--panel); color: var(--ink); border: 1px solid var(--line-strong); box-shadow: 0 4px 16px #00000008; font-size: 11px; opacity: .96; }
+.desktop-workspace .core-pick-overlay strong { font-size: 11px; font-weight: 500; }
+.desktop-workspace .core-pick-overlay button { background: var(--hover); color: var(--ink); border-color: var(--line); }
+.desktop-workspace .core-axis-hud { color: var(--muted); bottom: 12px; left: 12px; }
+.desktop-workspace .core-ruler { color: var(--muted); font-size: 10px; }
+.desktop-workspace .core-ruler > div { border-color: var(--muted); }
+.desktop-workspace .core-viewport > p { color: var(--muted); font-size: 13px; }
+.viewport-empty { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: center; align-items: center; color: var(--muted); text-align: center; padding: 25px; gap: 12px; background-image: radial-gradient(var(--line-strong) .7px, transparent .7px); background-size: 20px 20px; }
+.viewport-empty h2 { margin: 0; color: var(--ink); font-weight: 500; }
+.viewport-empty p { max-width: 330px; font-size: 12px; }
+.workspace-bottom-tabs { flex-shrink: 0; display: flex; align-items: center; gap: 16px; min-height: 37px; padding: 0 14px; border-top: 1px solid var(--line); }
+.workspace-bottom-tabs button { align-self: stretch; border: 0; border-radius: 0; color: var(--muted); font-size: 11px; padding: 8px 0; position: relative; }
+.workspace-bottom-tabs button[aria-selected="true"] { color: var(--ink); }
+.workspace-bottom-tabs button[aria-selected="true"]::after { content: ''; position: absolute; bottom: 0; left: 0; right: 0; height: 2px; background: var(--ink); }
+.workspace-bottom-tabs button > span { font-size: 10px; border-radius: 4px; background: var(--hover); padding: 0 5px; }
+.workspace-bottom-tabs .icon-button { margin-left: auto; align-self: center; }
+.workspace-bottom-panel { flex: 0 0 245px; min-height: 0; overflow: auto; border-top: 1px solid var(--line); background: var(--paper); padding: 12px 16px; }
+.desktop-workspace .core-results { border: 0; background: transparent; padding: 4px 0 15px; }
+.desktop-workspace .core-results h2, .desktop-workspace .core-jobs h2 { font-size: 13px; margin: 8px 0; }
+.desktop-workspace .core-results p { font-size: 12px; }
+.desktop-workspace .core-results dl { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.desktop-workspace .core-results dt { font-size: 10px; color: var(--muted); }
+.desktop-workspace .core-results dd { font-size: 16px; }
+.desktop-workspace .core-jobs { display: block; padding: 0; }
+.desktop-workspace .core-jobs > p { font-size: 11px; color: var(--muted); }
+.desktop-workspace .core-jobs article { padding: 10px 0; font-size: 12px; }
+.desktop-workspace .core-jobs article p { font-size: 11px; }
+.version-list > div { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--line); }
+.version-list span { flex: 1; font-family: var(--font-mono); font-size: 11px; }
+.version-list small { display: block; font-family: var(--font-ui); font-size: 10px; color: var(--muted); }
+.panel-empty { display: grid; justify-items: center; padding: 25px 10px; gap: 8px; color: var(--muted); font-size: 12px; }
+.panel-empty h3 { color: var(--ink); font-size: 13px; font-weight: 500; }
+.workspace-welcome { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; text-align: center; padding: 25px; }
+.workspace-welcome > svg { color: var(--muted); }
+.workspace-welcome h1 { font-size: clamp(20px, 2.2vw, 30px); font-weight: 500; letter-spacing: -.04em; }
+.workspace-welcome p { color: var(--muted); }
+.model-stage.no-project { display: none; }

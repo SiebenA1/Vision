@@ -1,0 +1,24 @@
+.workspace-modes { display: flex; gap: 3px; }
+.desktop-workspace .workspace-modes button { border: 0; background: transparent; color: var(--muted); white-space: nowrap; }
+.desktop-workspace .workspace-modes button[aria-current="page"] { color: var(--ink); background: var(--hover); }
+.engineering-stage { flex: 1; min-height: 0; display: flex; overflow: hidden; }
+.engineering-stage > .model-stage { min-width: 0; }
+.simulation-config { flex: 0 0 300px; width: 300px; overflow-y: auto; background: var(--paper); border-right: 1px solid var(--line); padding: 18px; }
+.simulation-config > header { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.simulation-config h2 { font-size: 14px; margin: 0; }
+.simulation-config p { color: var(--muted); font-size: 11px; line-height: 1.7; }
+.simulation-config label { font-size: 11px; }
+.simulation-config input, .simulation-config select, .simulation-config textarea { font-size: 12px; padding: 8px; }
+.simulation-config fieldset { border: 1px solid var(--line); border-radius: 8px; margin: 12px 0; padding: 10px; }
+.simulation-config legend { font-size: 11px; padding-inline: 4px; }
+.simulation-config textarea { font-family: monospace; }
+.simulation-config > button { margin-bottom: 8px; }
+.desktop-workspace .study-warning { color: var(--bad); }
+.desktop-workspace .core-field-legend { top: 55px; bottom: auto; left: 12px; right: 12px; max-width: 360px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel); color: var(--ink); display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 5px 10px; font-size: 10px; line-height: 1.5; }
+.desktop-workspace .core-field-legend strong { font-weight: 500; }
+.desktop-workspace .core-field-legend .core-color-ramp { align-self: center; height: 7px; }
+.desktop-workspace .core-field-legend > span:last-child { color: var(--muted); font-size: 9px; }
+@media (max-width: 1400px) { .simulation-config { flex-basis: 260px; width: 260px; padding: 12px; } .workspace-breadcrumb > span { max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } }
+@media (max-width: 1100px) { .workspace-modes button span { display: none; } }
+@media (max-width: 760px) { .simulation-stage { flex-direction: column; overflow-y: auto; } .simulation-config { flex: none; width: 100%; max-height: 50%; border-right: 0; border-bottom: 1px solid var(--line); } .simulation-stage .model-stage { min-height: 300px; } }
+@media (max-width: 480px) { .workspace-breadcrumb > span, .workspace-breadcrumb > svg { display: none; } .workspace-breadcrumb { gap: 0; } .desktop-workspace .workspace-modes button { padding-inline: 8px; } }
