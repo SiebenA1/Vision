@@ -11,6 +11,17 @@ def reply(finish):
 
 
 class IncompleteResponseTest(unittest.TestCase):
+    def test_cache_token_usage_is_recorded_only_when_consistent(self):
+        value = reply('tool_calls')
+        value['choices'][0]['message']['tool_calls'] = [{'id': 'call-1', 'type': 'function',
+            'function': {'name': 'finish', 'arguments': '{"summary":"done"}'}}]
+        value['usage'].update(prompt_cache_hit_tokens=6, prompt_cache_miss_tokens=4)
+        _, receipt = provider.parse(value, 'deepseek-flash')
+        self.assertEqual(receipt['usage']['prompt_cache_hit_tokens'], 6)
+        value['usage']['prompt_cache_hit_tokens'] = '6'
+        _, receipt = provider.parse(value, 'deepseek-flash')
+        self.assertNotIn('prompt_cache_hit_tokens', receipt['usage'])
+
     def test_thinking_tool_choice_rejection_is_actionable_and_redacted(self):
         import json
         body = json.dumps({'error':{'message':'tool_choice required is not supported in thinking mode; secret-key project-text'}}).encode()

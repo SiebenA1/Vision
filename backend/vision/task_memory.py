@@ -1,10 +1,8 @@
 """Layered project context with reserved evidence space and hybrid retrieval."""
 import hashlib
 import json
-import ast
-from collections import Counter
 
-from .engineering_memory import available, context_eligible, entries, lineage
+from .engineering_memory import available, context_eligible, lineage
 from .storage import packed
 
 
@@ -109,7 +107,7 @@ def compact_group(group, latest=False):
             'expand': {'turn_id': group['turn_id'], 'offset': 0, 'limit': 4000}}
 
 
-def context(workspace, task, turns, budget=60000):
+def context(workspace, task, turns, budget=60000, *, contributors=None):
     from .retrieval import retrieve, compact_text
     revision = workspace.revision(task["project"], task["revision"])
     with workspace.db() as db:
@@ -243,8 +241,6 @@ def context(workspace, task, turns, budget=60000):
                                  {'parameter_names':list(item['parameters'])[:8], 'parameter_count':len(item['parameters']),
                                   'interface_excerpt':True} for item in catalog['modules']]
         while len(packed(focus['module_catalog']))>2600 and len(focus['module_catalog'])>1:focus['module_catalog'].pop()
-    if latest_receipt and 'geometry_summary' in latest_receipt and latest_receipt['geometry_summary'].get('artifact_id') == document.get('geometry'):
-        latest_receipt = {key:value for key,value in latest_receipt.items() if key != 'geometry_summary'} | {'geometry_summary_in':'task_focus.geometry_summary'}
     latest_solve = next((turn for turn in reversed(observations) if turn['state'] == 'succeeded' and json.loads(turn['response']).get('tool') == 'solve'), None)
     solve_evidence = None
     if latest_solve:
@@ -264,9 +260,6 @@ def context(workspace, task, turns, budget=60000):
         if setup.get('artifact_id') == document.get('geometry'):
             analysis_setup = {key: value for key, value in setup.items() if key not in ('candidate_study', 'saved_study')}
             analysis_setup.update(epoch=task['epoch'], turn_id=setup_turn['id'])
-            if latest and latest['id'] == setup_turn['id']:
-                latest_receipt = {'data_in': 'analysis_setup', 'already_read': True,
-                                  'next_face_offset': setup.get('next_face_offset')}
     result = {"revision_id": task["revision"], "epoch": task["epoch"], "statement": statement,
         'task_focus': focus, 'latest_analysis': solve_evidence,
         'analysis_setup': analysis_setup,
@@ -305,15 +298,6 @@ def context(workspace, task, turns, budget=60000):
                                     'text': working_text[:capacity], 'offset': working_offset, 'total_characters': working_total,
                                     'truncated': len(working_text) > capacity or working_offset > 0 or len(working_text) < working_total,
                                     'expand': {'turn_id':working_turn['id'], 'offset':0, 'limit':4000}}
-        if latest and latest['id'] == working_turn['id'] and json.loads(latest['response']).get('tool') == 'read_script':
-            result['latest_observation'] = observation(latest, {'text_in':'working_script', 'offset':working_offset,
-                                                               'total_characters':working_total})
-    # Reserve space for omission counters sent to the planner, not only the audit UI.
-    used = len(packed(result)) + 512
-    if used > budget:
-        raise ValueError("current task context exceeds the character budget")
-    remaining = budget - used
-    # Messages cannot consume the share reserved for complete tool evidence.
     shares = {"recent_tool_groups": .30, "long_term_memory": .15, "stage_memory": .06,
               "historical_sources": .10, "conversation_messages": .14, "cad_api_reference": .16, "cad_api_signatures": .09}
     recent_tools = [json.loads(turn["response"] or "{}").get("tool") for turn in reversed(turns) if turn["epoch"] == task["epoch"] and turn["state"] == "succeeded"]
@@ -322,8 +306,6 @@ def context(workspace, task, turns, budget=60000):
     if phase == "analysis":
         shares = {"recent_tool_groups":.40,"long_term_memory":.20,"stage_memory":.05,"historical_sources":.13,
                   "conversation_messages":.17,"cad_api_reference":.03,"cad_api_signatures":.02}
-    allocations = {key: int(remaining * share) for key, share in shares.items()}
-    sizes, omitted = dict.fromkeys(shares, 0), dict.fromkeys(shares, 0)
     goal_sources = {source for item in goal_items for source in item['source_ids'] if available(rows, source)}
     dependencies = {task["source"], *(item["source_id"] for item in instructions), *reply_sources, *goal_sources,
                     *(check_sources if valid_check else []), *capability_sources, intent_id}
@@ -336,140 +318,14 @@ def context(workspace, task, turns, budget=60000):
         dependencies.update(item['source_id'] for item in latest_receipt.get('sources', []))
     if failure:
         dependencies.update(json.loads(failure['response']).get('request', {}).get('source_ids', []))
-    represented_sources, represented_turns = set(), set()
-    deferred = []
-
-    def add(section, item, sources=()):
-        nonlocal used
-        cost = len(packed(item)) + 1
-        if sizes[section] + cost > allocations[section] or used + cost > budget:
-            omitted[section] += 1
-            deferred.append((section, item, sources))
-            return False
-        result[section].append(item)
-        sizes[section] += cost
-        used += cost
-        dependencies.update(sources)
-        return True
-
-    symbols, api_groups = set(), 0
-    # Rank full pages by the latest candidate's actual calls and error, rather
-    # than filling the context with whichever API was queried most recently.
-    candidate = next((json.loads(turn.get('arguments') or '{}').get('script') for turn in reversed(turns)
-                      if json.loads(turn.get('arguments') or '{}').get('script')), '')
-    try:
-        called = {node.func.attr for node in ast.walk(ast.parse(candidate)) if isinstance(node, ast.Call)
-                  and isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name)
-                  and node.func.value.id in ('u', 'usd_brep')}
-    except SyntaxError:
-        called = set()
-    api_pages = []
-    core_symbols = {entry['symbol'] for entry in (capability_index or {}).get('core_signatures', [])}
-    for turn in reversed(turns):
-        if (turn["epoch"] != task["epoch"] and not source.get("conversation")) or turn["state"] != "succeeded":
-            continue
-        response = json.loads(turn["response"])
-        instruction = {key: response[key] for key in ("tool", "arguments") if key in response}
-        group = {"turn_id": turn["id"], "epoch": turn["epoch"], "revision_id": turn["revision"], "instruction": instruction,
-                 "tool_receipt": current_receipt(rows, revision, instruction['tool'], json.loads(turn["receipt"])),
-                 "current_revision": turn["revision"] == task["revision"]}
-        sources = response.get("request", {}).get("source_ids", []) + group["tool_receipt"].get("source_ids", [])
-        if instruction["tool"] == "remember":
-            memory_id = group["tool_receipt"].get("source_id")
-            if memory_id in rows and not context_eligible(rows, memory_id, revision):
-                continue
-        if instruction["tool"] == "native_api":
-            receipt = group["tool_receipt"]
-            if receipt.get("runtime_id"):
-                if runtime_key is None:
-                    from .queries import api_identity
-                    runtime_key = api_identity()
-                if receipt["runtime_id"] != runtime_key:
-                    continue
-            elif turn["epoch"] != task["epoch"]:
-                continue  # Legacy receipts have no reusable implementation identity.
-            lookups = receipt.get("lookups", [receipt])
-            for lookup in lookups:
-                for entry in lookup.get("entries", []):
-                    symbol = entry.get("symbol")
-                    if symbol in symbols or not symbol or not (entry.get("documentation") or entry.get("signature")):
-                        continue
-                    name = symbol.split('.')[-1]
-                    error_match = name.replace('_', '').lower() in (last_error or '').replace('_', '').lower()
-                    priority = (not error_match, latest is None or turn['id'] != latest['id'], name not in called)
-                    api_pages.append((priority, {**entry, "version": receipt.get("version"), "turn_id": turn["id"]}, sources))
-                    symbols.add(symbol)
-            # Keep recent query feedback, not repeated full documentation pages.
-            if api_groups >= 2:
-                continue
-            api_groups += 1
-            group["tool_receipt"] = {"version": receipt.get("version"), "lookups": [
-                {key: item[key] for key in ("query", "offset", "total_matches", "suggested_symbols", "matching_symbols", "next_offset", "has_more") if key in item} |
-                {"symbols": [entry.get("symbol") for entry in item.get("entries", [])]} for item in lookups]}
-        if len(result["recent_tool_groups"]) < 8:
-            if result.get('working_script', {}).get('turn_id') == turn['id'] and instruction['tool'] == 'read_script':
-                group['tool_receipt'] = {'text_in':'working_script', 'offset':working_offset, 'total_characters':working_total}
-            if add("recent_tool_groups", compact_group(group, latest=latest is not None and turn['id'] == latest['id']), sources): represented_turns.add(turn["id"])
-    ranked_pages = sorted(api_pages, key=lambda item: item[0])
-    for _, page, page_sources in ranked_pages[:12]:
-        if page['symbol'] not in core_symbols:
-            add('cad_api_signatures', {'symbol': page['symbol'], 'signature': page.get('signature') or page['documentation'].split('\n\n', 1)[0],
-                                     'version': page['version'], 'turn_id': page['turn_id']}, page_sources)
-    omitted['cad_api_signatures'] += sum(page['symbol'] not in core_symbols for _, page, _ in ranked_pages[12:])
-    needs_api_pages = not preview_state and (last_build is None or last_build['state'] != 'succeeded'
-                        or latest is not None and json.loads(latest['response'] or '{}').get('tool') in ('native_api', 'read_tool_result'))
-    selected_pages = ranked_pages[:4] if needs_api_pages else []
-    for _, page, page_sources in selected_pages:
-        add('cad_api_reference', page, page_sources)
-    omitted['cad_api_reference'] += len(api_pages) - len(selected_pages)
-    result["recent_tool_groups"].reverse()
-    memories = sorted(reversed(entries(workspace, task["project"], task["revision"])), key=lambda memory: not memory.get("confirmed", False))
-    for memory in memories:
-        if not memory.get("applicable"):
-            continue
-        section = "stage_memory" if memory["kind"] == "stage" else "long_term_memory"
-        if "tools" in memory:
-            memory = {key: value for key, value in memory.items() if key != "tools"} | {"tool_counts": dict(Counter(memory["tools"]))}
-        if add(section, memory, memory["source_ids"]): represented_sources.add(memory["source_id"])
-    indexed_turn_ids = {turn['id'] for turn in turns}
-    for item in historical:
-        from .code_modules import is_module
-        if is_module(rows.get(item['source_id'],{})):
-            continue  # Module interfaces have their own catalog, never prose-replayed code.
-        if item["source_id"] in represented_sources or item.get("turn_id") in represented_turns:
-            continue
-        if item.get('origin') == 'tool_receipt' and item.get('turn_id') in indexed_turn_ids:
-            continue  # Same-task receipts already have an expandable turn index.
-        add("historical_sources", item, item.get("source_ids", [item["source_id"]]))
-    if source.get("conversation"):
-        for source_id, message in reversed(list(rows.items())):
-            if not message.get("conversation") or message.get("task_id") != task["id"] or message.get("epoch", 0) > task["epoch"]:
-                continue
-            entry = {"source_id": source_id, "role": "user", "text": message["text"],
-                     "revision_id": message.get("revision_id"), "reference": message.get("reference")}
-            if entry["reference"]:
-                entry["reference"] = {**entry["reference"], "current_geometry": entry["reference"]["artifact_id"] == document.get("geometry")}
-            add("conversation_messages", entry, [source_id])
-        result["conversation_messages"].reverse()
-    # Once every layer has received its reserved share, lend unused capacity.
-    for section, item, sources in deferred:
-        cost = len(packed(item)) + 1
-        if used + cost > budget or section == 'recent_tool_groups' and len(result[section]) >= 8:
-            continue
-        result[section].append(item)
-        sizes[section] += cost
-        used += cost
-        omitted[section] -= 1
-        dependencies.update(sources)
-    order = {turn['id']: index for index, turn in enumerate(turns)}
-    result['recent_tool_groups'].sort(key=lambda item: order[item['turn_id']])
-    message_order = {key: index for index, key in enumerate(rows)}
-    result['conversation_messages'].sort(key=lambda item: message_order[item['source_id']])
-    result['context_omissions'] = {key: value for key, value in omitted.items() if value}
+    from .context_contributions import ContextInputs
+    from .context_assembly import assemble
+    inputs = ContextInputs(workspace, task, turns, rows, revision, source, latest['id'] if latest else None,
+                           last_error or '', preview_state, last_build, runtime_key, capability_index, historical,
+                           {'latest_observation': latest_receipt, 'latest_failure': failure_receipt})
+    assembly = assemble(result, inputs, shares, budget, dependencies, contributors)
     encoded = packed(result)
     return result, {"characters": len(encoded), "budget_characters": budget,
         "estimated_text_tokens_upper_bound": len(encoded.encode("utf-8")), "token_estimate_method": "utf8_bytes_not_provider_tokenizer",
         "sha256": hashlib.sha256(encoded.encode()).hexdigest(), "source_ids": lineage(rows, dependencies),
-        "layers": {key: {"allocated_characters": allocations[key], "used_characters": sizes[key],
-                         'borrowed_characters': max(0, sizes[key] - allocations[key]), "omitted_entries": omitted[key]} for key in shares},
-        "phase": phase, "retrieval": retrieval}
+        "phase": phase, "retrieval": retrieval, **assembly}

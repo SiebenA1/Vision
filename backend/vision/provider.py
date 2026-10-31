@@ -257,6 +257,10 @@ def parse(response, model):
         usage = {key: response["usage"][key] for key in ("prompt_tokens", "completion_tokens", "total_tokens")}
         if any(type(value) is not int or value < 0 for value in usage.values()) or usage["total_tokens"] != usage["prompt_tokens"] + usage["completion_tokens"]:
             raise ValueError("invalid token usage")
+        cached = {key: response['usage'].get(key) for key in ('prompt_cache_hit_tokens', 'prompt_cache_miss_tokens')}
+        if (all(type(value) is int and 0 <= value <= usage['prompt_tokens'] for value in cached.values())
+                and sum(cached.values()) == usage['prompt_tokens']):
+            usage.update(cached)
         message = choices[0].get('message') or {}
         if not isinstance(message, dict):
             raise ValueError('invalid response message')

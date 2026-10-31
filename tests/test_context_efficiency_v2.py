@@ -6,6 +6,7 @@ import test_modeling_recovery_v2 as recovery
 from backend.vision.storage import packed
 from backend.vision.model_tasks import planning_progress
 from backend.vision import provider
+from backend.vision.context_content import resolve_content
 
 
 class ContextEfficiencyTest(unittest.TestCase):
@@ -87,7 +88,7 @@ class ContextEfficiencyTest(unittest.TestCase):
             compiled, meta = self.compile([setup])
             self.assertEqual(compiled['analysis_setup']['faces'], receipt['faces'])
             self.assertNotIn('saved_study', compiled['analysis_setup'])
-            self.assertEqual(compiled['latest_observation']['receipt']['data_in'], 'analysis_setup')
+            self.assertEqual(resolve_content(compiled, compiled['latest_observation']['receipt'])['faces'], receipt['faces'])
             compiled, meta = self.compile([setup, self.turn('read_tool_result', {'text': 'details'})])
             self.assertEqual(compiled['analysis_setup']['faces'], receipt['faces'])
             self.assertEqual(compiled['workflow_phase'], 'analysis')

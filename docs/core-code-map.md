@@ -20,6 +20,7 @@
 | `model_io.py`、`tool_admission.py` | 有界异步模型请求、取消排空、每步不可变工具准入 |
 | `prompts.py`、`read_batch.py` | 阶段提示贡献和逐项持久化的有界只读批次 |
 | `engineering_memory.py`、`task_memory.py`、`retrieval.py` | 工程记忆和检索 |
+| `context_contributions.py`、`context_assembly.py`、`context_content.py` | 通用上下文贡献、统一来源准入与预算、内容复用及引用校验 |
 | `studies.py`、`assessment.py`、`verification.py`、`benchmarks.py` | 工况、评估与求解校核 |
 
 ## 本次删除

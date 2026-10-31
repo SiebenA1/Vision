@@ -1,6 +1,6 @@
 """Versioned built-in prompt contributions; no provider or project side effects."""
 
-PROMPT_POLICY = 'phase-sections/1'
+PROMPT_POLICY = 'phase-sections/2'
 # Full original text remains available to offline baseline diagnostics.
 
 _SECTIONS = (
@@ -38,7 +38,13 @@ SYSTEM = '\n'.join(text for _, text in _SECTIONS) + '\n'
 def system_prompt(phase):
     if phase not in ('modeling', 'analysis'):
         raise ValueError('unknown workflow phase')
-    return '\n'.join(text for scope, text in _SECTIONS if scope in ('common', phase)) + '\n' + _ANALYSIS_ENTRY_GUARD
+    return '\n'.join(text for scope, text in _SECTIONS if scope in ('common', phase)) + '\n' + _ANALYSIS_ENTRY_GUARD + _CONTENT_REFERENCES
+
+
+_CONTENT_REFERENCES = (
+    'A content_ref reuses exact content already present in THIS request: select its section, optional source_id/turn_id/symbol, '
+    'then follow path keys; slice=[start,length] selects text, or slices plus join reconstruct an exact head/tail excerpt. Resolve locally without another tool call. '
+    'The surrounding source, version, role, state and confirmation still apply; shared text does not merge decisions or prove verification.\n')
 
 
 # A first analysis request can arrive while the retained workflow is modeling.
