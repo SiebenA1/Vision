@@ -68,9 +68,9 @@ def planning_progress(task, turns, runtime_id=None):
             post_build, post_build_reads = True, 0
         elif tool in ('configure_study', 'solve'):
             post_build = False
-        elif post_build and tool in ('list_topology', 'inspect_geometry', 'check_modeling'):
+        elif post_build and tool in ('list_topology', 'inspect_geometry', 'check_modeling', 'read_batch'):
             post_build_reads += 1
-        if tool in ('native_api', 'preview_build', 'list_topology', 'inspect_geometry', 'analysis_context'):
+        if tool in ('native_api', 'preview_build', 'list_topology', 'inspect_geometry', 'analysis_context', 'read_batch'):
             preparation_steps += 1
         if tool == 'preview_build':
             previews += 1
@@ -86,7 +86,7 @@ def planning_progress(task, turns, runtime_id=None):
             symbols = known_symbols(turn)
             stale = 0 if symbols - seen else stale + 1
             seen.update(symbols)
-        elif tool in ('preview_build', 'read_script', 'read_source', 'read_tool_result', 'list_topology', 'inspect_geometry', 'analysis_context', 'search_sources', 'set_modeling_requirements', 'check_modeling'):
+        elif tool in ('preview_build', 'read_script', 'read_source', 'read_tool_result', 'list_topology', 'inspect_geometry', 'analysis_context', 'search_sources', 'set_modeling_requirements', 'check_modeling', 'read_batch'):
             arguments = {key: value for key, value in value.get('arguments', {}).items()
                          if key not in ('command_id', 'idempotency_key', 'expected_head')}
             if tool == 'analysis_context':
@@ -97,16 +97,20 @@ def planning_progress(task, turns, runtime_id=None):
                     arguments['script'] = ast.dump(ast.parse(arguments.get('script', '')), include_attributes=False)
                 except SyntaxError:
                     pass
+            receipt = {} if tool == 'preview_build' else json.loads(turn.get('receipt') or '{}')
+            if tool == 'read_batch':
+                receipt = {'calls': [{key: call.get(key) for key in ('tool', 'state', 'receipt', 'error')}
+                                     for call in receipt.get('calls', [])]}
             signature = packed({'tool': tool, 'arguments': arguments,
                                 'revision': turn.get('revision'),
-                                'receipt': {} if tool == 'preview_build' else json.loads(turn.get('receipt') or '{}')})
+                                'receipt': receipt})
             repeated[signature] = repeated.get(signature, 0) + 1
             if repeated[signature] >= (2 if tool == 'analysis_context' else 3):
                 blocked.add(tool)
     if stale >= 3:
         blocked.add('native_api')
     if preparation_steps >= 8:
-        blocked.update(('native_api', 'list_topology', 'inspect_geometry'))
+        blocked.update(('native_api', 'list_topology', 'inspect_geometry', 'read_batch'))
     if previews >= 3:
         blocked.add('preview_build')
     return {"api_lookups_since_progress": lookups, "consecutive_uninformative_lookups": stale,

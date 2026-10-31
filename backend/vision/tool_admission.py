@@ -43,3 +43,14 @@ class ToolAdmission:
         if extra or missing:
             # Field names only; do not echo potentially sensitive argument values.
             raise ValueError('admitted tool fields invalid: ' + packed({'extra': sorted(extra), 'missing': sorted(missing)}))
+        if item['tool'] == 'read_batch':
+            from .read_batch import READ_TOOLS
+            calls = arguments.get('calls')
+            if not isinstance(calls, list) or not 1 <= len(calls) <= 4:
+                raise ValueError('read_batch requires 1–4 child calls')
+            for call in calls:
+                if (not isinstance(call, dict) or set(call) - {'tool', 'arguments'}
+                        or call.get('tool') not in READ_TOOLS):
+                    raise ValueError('read_batch permits only independent bounded reads')
+                call = {'tool': call['tool'], 'arguments': call.get('arguments', {})}
+                self.validate_surface(call)

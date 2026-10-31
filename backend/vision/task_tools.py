@@ -15,6 +15,7 @@ from .studies import configure_study
 from .task_memory import search
 from .storage import packed
 from .contracts import RegisterCodeModule, SearchCodeModules, ReadCodeModule, Edit, Digest, CodeParameterRef, CodeValue, Vector
+from .read_batch import ReadBatch, execute_batch, prepare_calls
 
 
 class CadScriptError(ValueError):
@@ -182,7 +183,7 @@ class ReadCodeAssembly(Contract):
     limit: int = Field(default=4,ge=1,le=8)
 
 
-_PARAMETER_MODELS = {"preview_build": Build, "build_geometry": Build, "configure_study": ConfigureStudy,
+_PARAMETER_MODELS = {'read_batch': ReadBatch, "preview_build": Build, "build_geometry": Build, "configure_study": ConfigureStudy,
     "solve": Solve, "assessment": Contract, "analysis_context": AnalysisContext, "beam_reference": BeamReference, "solver_validation": Contract, "search_sources": Query, "remember": Remember, "ask_user": Question,
     "read_source": SourceRange, "read_tool_result": ToolResultRange, "read_script": ScriptRange,
     "inspect_geometry": Selection, "list_topology": TopologyPage, "native_api": ApiQuery, "finish": Finish,
@@ -230,6 +231,8 @@ def prepare(task, item, turns, workspace=None):
     key = f"{task['id']}.e{task['epoch']}.s{task['turns']}"
     command = {"command_id": key, "idempotency_key": key, "expected_head": task["revision"]}
     tool = item["tool"]
+    if tool == 'read_batch':
+        return {'calls': prepare_calls(task, arguments, turns, workspace)}
     if tool in ('register_code_module','patch_code_module'):
         return TOOL_MODELS[tool](**arguments,**command).model_dump()
     if tool in ("build_geometry", "preview_build"):
@@ -528,7 +531,7 @@ class ToolDefinition:
     phases: tuple
 
 
-_DESCRIPTIONS = {"native_api": "Read installed CAD signatures. Batch up to 4 lookups with queries=[{query:'create_cylinder'},{query:'linear_sweep'}] in ONE call. Space or | separated keywords match alternatives. Functions and exact names rank first. Reuse cad_api_reference from context; do not query known signatures again. suggest_query is not a parameter.",
+_DESCRIPTIONS = {'read_batch': 'Read 1–4 independent bounded sources, scripts, tool receipts or topology pages in one call. Each child uses its named tool schema and must already be available. No writes, nested batches or guessed dependencies. Text limit <=2000, topology limit <=8; larger results fail explicitly. Receipts keep ordered child identities and expand through read_tool_result.', "native_api": "Read installed CAD signatures. Batch up to 4 lookups with queries=[{query:'create_cylinder'},{query:'linear_sweep'}] in ONE call. Space or | separated keywords match alternatives. Functions and exact names rank first. Reuse cad_api_reference from context; do not query known signatures again. suggest_query is not a parameter.",
                 'register_code_module':'Register immutable Python for one reusable local-coordinate Brep in result. Declare parameter types/units/bounds, source IDs and optional requirement bindings. Syntax checked, not geometry verified. Code is stored outside dialogue. Modules receive u, parameters, params and declared dependency parts as copies.',
                 'search_code_modules':'Find project-scoped compatible module interfaces by tags, parameter names and text; semantic=true enables optional local reranking. Returns exact version references, no source code.',
                 'read_code_module':'Read a bounded source range of one exact module version. Do not reconstruct modules from historical prose.',
@@ -558,6 +561,7 @@ _EXCLUSIVE = frozenset(('preview_build', 'build_geometry', 'configure_study', 's
 _RESOURCES = {'native_api': 'query', 'inspect_geometry': 'query', 'build_geometry': 'native-job',
               'solve': 'native-job', 'search_sources': 'retrieval', 'search_code_modules': 'retrieval'}
 _HANDLERS = {
+    'read_batch': execute_batch,
     'preview_build': _run_preview_build,
     'build_geometry': _run_build_geometry,
     'configure_study': _run_configure_study,

@@ -10,6 +10,7 @@ import httpx
 from .contracts import TaskStep
 from .storage import packed
 from .task_tools import tool_schemas, TOOL_REGISTRY
+from .read_batch import READ_TOOLS
 from .prompts import SYSTEM, PROMPT_POLICY, system_prompt, iteration_prompt
 
 URL = "https://api.deepseek.com/chat/completions"
@@ -140,7 +141,7 @@ def payload(compiled, model):
     if not analyzing and checked_build:
         next_action = 'finish'
         if compiled.get('planning_progress', {}).get('post_build_inspections', 0) >= 2:
-            tools = [tool for tool in tools if tool['function']['name'] not in ('list_topology', 'inspect_geometry', 'check_modeling', 'native_api')]
+            tools = [tool for tool in tools if tool['function']['name'] not in ('list_topology', 'inspect_geometry', 'check_modeling', 'native_api', 'read_batch')]
     planning = complex_plan and last_build_state is None and latest_tool == 'set_modeling_requirements'
     repairing_build = last_build_state == 'failed' and latest_tool == 'build_geometry'
     reasoning_effort = 'high' if has_api_evidence and has_modeling_goals and not has_preview and (planning or repairing_build) else 'low'
@@ -149,6 +150,14 @@ def payload(compiled, model):
         # source queries inspect the old geometry, not that unexecuted script.
         after_preview = {'build_geometry', 'preview_build', 'ask_user', 'finish', 'read_tool_result'}
         tools = [tool for tool in tools if tool['function']['name'] in after_preview]
+    names = {tool['function']['name'] for tool in tools}
+    batch = next((tool for tool in tools if tool['function']['name'] == 'read_batch'), None)
+    if batch:
+        allowed_reads = [name for name in READ_TOOLS if name in names]
+        if allowed_reads:
+            batch['function']['parameters']['$defs']['ReadCall']['properties']['tool']['enum'] = allowed_reads
+        else:
+            tools.remove(batch)
     # Each call starts a fresh, fully checkpointed request. No assistant/tool
     # history is partially replayed, so there is no missing reasoning_content.
     result = {"model": model, "messages": [{"role": "system", "content": system_prompt('analysis' if analyzing else 'modeling')},

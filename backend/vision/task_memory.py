@@ -17,6 +17,11 @@ def current_receipt(rows, revision, tool, receipt):
     """Revalidate copied source text, not only new retrieval results."""
     def eligible(source):
         return source in rows and available(rows, source) and context_eligible(rows, source, revision)
+    if tool == 'read_batch':
+        if any(not eligible(source) for source in receipt.get('source_ids', [])):
+            return {'context_status': 'source_no_longer_applicable', 'source_ids': [], 'calls': []}
+        return {**receipt, 'calls': [{**call, 'receipt': current_receipt(rows, revision, call['tool'], call['receipt'])}
+                                    if call.get('receipt') else call for call in receipt.get('calls', [])]}
     if tool == 'analysis_context' and (receipt.get('revision_id') != revision['revision_id'] or receipt.get('artifact_id') != revision['document'].get('geometry')):
         return {'context_status': 'stale_analysis_context', 'meaning': 'Read analysis_context again for current geometry and study.'}
     if receipt.get('modeling_check'):
@@ -312,7 +317,7 @@ def context(workspace, task, turns, budget=60000):
     shares = {"recent_tool_groups": .30, "long_term_memory": .15, "stage_memory": .06,
               "historical_sources": .10, "conversation_messages": .14, "cad_api_reference": .16, "cad_api_signatures": .09}
     recent_tools = [json.loads(turn["response"] or "{}").get("tool") for turn in reversed(turns) if turn["epoch"] == task["epoch"] and turn["state"] == "succeeded"]
-    phase = "analysis" if next((tool for tool in recent_tools if tool not in ("remember", "search_sources", "read_source", "read_tool_result", "list_topology", "inspect_geometry")), None) in ("analysis_context", "configure_study", "solve", "assessment", "beam_reference", "solver_validation") else "modeling"
+    phase = "analysis" if next((tool for tool in recent_tools if tool not in ("remember", "search_sources", "read_source", "read_tool_result", "list_topology", "inspect_geometry", "read_batch")), None) in ("analysis_context", "configure_study", "solve", "assessment", "beam_reference", "solver_validation") else "modeling"
     result['workflow_phase'] = phase
     if phase == "analysis":
         shares = {"recent_tool_groups":.40,"long_term_memory":.20,"stage_memory":.05,"historical_sources":.13,

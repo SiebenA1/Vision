@@ -121,7 +121,14 @@ class Tasks:
         return self.receipt("create_model_task" if model else "create_task", {**request, "project_id": project}, create)
 
     def cancel_owned(self, db, task, epoch):
-        for step in db.execute("SELECT id,job,arguments FROM agent_turns WHERE task=? AND epoch=?", (task, epoch)).fetchall():
+        for step in db.execute("SELECT id,job,arguments,response,receipt FROM agent_turns WHERE task=? AND epoch=?", (task, epoch)).fetchall():
+            if step['receipt'] and json.loads(step['response'] or '{}').get('tool') == 'read_batch':
+                receipt = json.loads(step['receipt'])
+                for call in receipt.get('calls', []):
+                    if call['state'] in ('executing', 'not_started'):
+                        call.update(state='cancelled' if call['state'] == 'executing' else 'cancelled_before_start',
+                                    error='task corrected or stopped; no result adopted')
+                db.execute('UPDATE agent_turns SET receipt=? WHERE id=?', (packed(receipt), step['id']))
             job = step["job"]
             if not job and step["arguments"]:
                 command = json.loads(step["arguments"]).get("command_id")
@@ -390,7 +397,7 @@ class Tasks:
                 if tool == 'finish' and self.workspace._revision(db, task['project'])['revision_id'] != revision:
                     raise Conflict('project changed before finish checkpoint')
                 if tool in ("search_sources", "read_source", "read_tool_result", 'set_modeling_requirements', 'check_modeling', 'finish',
-                            'register_code_module','search_code_modules','read_code_module','patch_code_module','read_code_assembly'):
+                            'register_code_module','search_code_modules','read_code_module','patch_code_module','read_code_assembly', 'read_batch'):
                     for source in receipt["sources"] if tool == "search_sources" else [{"source_id": key} for key in receipt["source_ids"]]:
                         stored = db.execute("SELECT payload FROM sources WHERE id=? AND project=?", (source["source_id"], task["project"])).fetchone()
                         if not stored or json.loads(stored[0]).get("origin") == "deleted":

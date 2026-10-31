@@ -419,7 +419,7 @@ class InspectGeometry(Contract):
 
 
 class TaskStep(Contract):
-    tool: Literal["preview_build", "build_geometry", "configure_study", "solve", "assessment", "search_sources", "remember", "read_source", "read_tool_result", "read_script", "inspect_geometry", "list_topology", "ask_user", "native_api", "analysis_context", "beam_reference", "solver_validation", "finish", 'set_modeling_requirements', 'check_modeling', 'register_code_module', 'search_code_modules', 'read_code_module', 'patch_code_module','read_code_assembly']
+    tool: Literal["preview_build", "build_geometry", "configure_study", "solve", "assessment", "search_sources", "remember", "read_source", "read_tool_result", "read_script", "inspect_geometry", "list_topology", "ask_user", "native_api", "analysis_context", "beam_reference", "solver_validation", "finish", 'set_modeling_requirements', 'check_modeling', 'register_code_module', 'search_code_modules', 'read_code_module', 'patch_code_module', 'read_code_assembly', 'read_batch']
     arguments: dict = Field(default_factory=dict)
 
 
