@@ -168,7 +168,10 @@ def prepare_request(runner, task, turns, config):
     metadata.update(payload_sha256=hashlib.sha256(packed(request).encode()).hexdigest(), reserved_tokens=reservation,
                     timings_ms={"context": context_ms, "payload": schema_ms},
                     payload_bytes=len(packed(request).encode()), offered_tools=len(request["tools"]),
-                    execution_policy="bounded-model-io/1", tool_admission_sha256=admission.sha256)
+                    execution_policy="bounded-model-io/1", tool_admission_sha256=admission.sha256,
+                    prompt_policy=provider.PROMPT_POLICY, prompt_characters=len(request['messages'][0]['content']),
+                    schema_characters=len(packed(request['tools'])),
+                    context_sections={key: len(packed(value)) for key, value in compiled.items()})
     pending = {"id": identity(), "state": "requesting_model", "arguments": None,
                "response": packed({"tool": "model_request", "request": metadata})}
     with runner.workspace.db() as db:
