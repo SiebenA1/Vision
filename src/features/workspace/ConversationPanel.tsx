@@ -1,15 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
-import { coreCommand, coreRequest } from './api';
+import { coreCommand, coreRequest, type CoreStudy } from './api';
 import { objectLabel, modelCompletionLabel, modelCheckValue, type ModelCompletion } from './viewHelpers';
 import { ArrowUp, BrainCircuit, ChevronDown, LoaderCircle, Square, Sparkles } from 'lucide-react';
 import type { MemorySeed } from './MemoryPanel';
 
 interface Message { id: string; role: string; text: string; revision_id?: string; completion?: ModelCompletion | null; reference?: { artifact_id: string; selection: string[] } | null }
-interface Task { id: string; epoch: number; state: string; error: string | null; turns: number; jobs: number; config: { used_tokens?: number }; steps: Array<{ epoch: number; response: { tool: string } | null; state: string }> }
+interface Task { id: string; epoch: number; state: string; error: string | null; turns: number; jobs: number; config: { used_tokens?: number }; steps: Array<{ epoch: number; response: { tool: string } | null; receipt?: { revision_id?: string } | null; state: string }> }
 interface Conversation { messages: Message[]; task: Task | null }
+interface Health { model: { configured: boolean; model: string }; features?: string[] }
 const states: Record<string, string> = { created: '准备执行', executing: '正在处理', waiting_job: '原生工程计算中', waiting_user: '等待你的回复或处理', completed: '已回复', cancelled: '已停止' };
 
-export function ConversationPanel({ project, revision, artifact, selection, referenceRequest, onMemory, onModel, settingsVersion }: { project: string; revision: string; artifact: string | null; selection: string[]; referenceRequest: number; onMemory: (source?: MemorySeed) => void; onModel: () => void; settingsVersion: number }) {
+export function ConversationPanel({ project, revision, artifact, selection, referenceRequest, onMemory, onModel, settingsVersion, analysisMode, analysisDraft, onStudyConfigured }: { project: string; revision: string; artifact: string | null; selection: string[]; referenceRequest: number; onMemory: (source?: MemorySeed) => void; onModel: () => void; settingsVersion: number; analysisMode?: boolean; analysisDraft?: CoreStudy | null; onStudyConfigured?: (revision: string) => void }) {
   const [data, setData] = useState<Conversation>({ messages: [], task: null });
   const [text, setText] = useState(() => localStorage.getItem(`vision-chat-draft:${project}`) ?? '');
   const [error, setError] = useState('');
@@ -18,7 +19,9 @@ export function ConversationPanel({ project, revision, artifact, selection, refe
   const [busy, setBusy] = useState(false);
   const [reference, setReference] = useState<{ artifact: string; revision: string; selection: string[] } | null>(null);
   const [provider, setProvider] = useState<{ configured: boolean; model: string } | null>(null);
+  const [analysisSupported, setAnalysisSupported] = useState(false);
   const generation = useRef(0);
+  const submittedStudy = useRef<{ task: string; epoch: number; candidate: string } | null>(null);
   const healthCheckedAt = useRef(0);
   const lastReferenceRequest = useRef(0);
   const bottom = useRef<HTMLDivElement>(null);
@@ -41,8 +44,8 @@ export function ConversationPanel({ project, revision, artifact, selection, refe
         const result = await coreRequest<Conversation>(`/projects/${project}/conversation`, undefined, abort.signal);
         if (!disposed && current === generation.current) { setData(result); setReady(true); setPollError(''); }
         if (!disposed && Date.now() - healthCheckedAt.current > 10000) {
-          const health = await coreRequest<{ model: { configured: boolean; model: string } }>('/health', undefined, abort.signal);
-          if (!disposed) { setProvider(health.model); healthCheckedAt.current = Date.now(); }
+          const health = await coreRequest<Health>('/health', undefined, abort.signal);
+          if (!disposed) { setProvider(health.model); setAnalysisSupported(health.features?.includes('conversation-analysis-draft/1') === true); healthCheckedAt.current = Date.now(); }
         }
       } catch (failure) { if (!disposed) setPollError(String(failure)); }
       if (!disposed) timer = setTimeout(() => void poll(), 1000);
@@ -51,18 +54,27 @@ export function ConversationPanel({ project, revision, artifact, selection, refe
   }, [project]);
   useEffect(() => {
     const abort = new AbortController();
-    void coreRequest<{ model: { configured: boolean; model: string } }>('/health', undefined, abort.signal).then(value => { setProvider(value.model); healthCheckedAt.current = Date.now(); }).catch(() => {});
+    void coreRequest<Health>('/health', undefined, abort.signal).then(value => { setProvider(value.model); setAnalysisSupported(value.features?.includes('conversation-analysis-draft/1') === true); healthCheckedAt.current = Date.now(); }).catch(() => {});
     return () => abort.abort();
   }, [settingsVersion]);
   useEffect(() => { if (follow) bottom.current?.scrollIntoView({ block: 'nearest' }); }, [data.messages.length, follow]);
+  useEffect(() => {
+    const handed = submittedStudy.current;
+    if (!handed || data.task?.id !== handed.task || data.task.epoch !== handed.epoch || JSON.stringify(analysisDraft) !== handed.candidate) return;
+    const configured = data.task.steps.some(item => item.epoch === handed.epoch && item.state === 'succeeded' && item.response?.tool === 'configure_study' && item.receipt?.revision_id === revision);
+    if (configured) { submittedStudy.current = null; onStudyConfigured?.(revision); }
+  }, [data.task, revision, analysisDraft, onStudyConfigured]);
   const send = async () => {
     if (busy || !ready || !text.trim() || stale || !provider?.configured) return;
     const draft = text;
     generation.current++; setBusy(true); setError('');
     try {
-      await coreRequest(`/projects/${project}/conversation`, { ...coreCommand(revision), text: draft,
+      if (analysisMode && analysisDraft && !analysisSupported) throw new Error('后端仍在运行旧版接口，暂不支持分析工况上下文。请重启本地后端后重试；消息和草稿已保留。');
+      const receipt = await coreRequest<{ task_id: string; epoch: number }>(`/projects/${project}/conversation`, { ...coreCommand(revision), text: draft,
         expected_task: data.task?.id ?? null, expected_epoch: data.task?.epoch ?? null,
-        artifact_id: reference?.artifact ?? null, selection: reference?.selection ?? [] });
+        artifact_id: reference?.artifact ?? (analysisMode ? artifact : null), selection: reference?.selection ?? (analysisMode ? selection : []),
+        ...(analysisMode && analysisDraft ? { analysis_draft: analysisDraft } : {}) });
+      submittedStudy.current = analysisMode && analysisDraft ? { task: receipt.task_id, epoch: receipt.epoch, candidate: JSON.stringify(analysisDraft) } : null;
       setText(''); setReference(null); setFollow(true);
       setData(await coreRequest<Conversation>(`/projects/${project}/conversation`));
     } catch (failure) { setError(String(failure)); }
@@ -99,7 +111,8 @@ export function ConversationPanel({ project, revision, artifact, selection, refe
       {error && <p className="core-error" role="alert">{error}</p>}
       {pollError && <p className="core-error" role="alert">{pollError}</p>}
       {provider?.configured === false && <p role="status">请在后端配置 DEEPSEEK_API_KEY；不要在对话里填写密钥。</p>}
-      <label className="conversation-input"><span className="sr-only">你的消息</span><textarea aria-label="对话消息" rows={3} value={text} placeholder="描述模型，或提出修改…" onChange={event => setText(event.target.value)} onKeyDown={event => {
+      {analysisMode && <small className="analysis-chat-context">静力分析 · 自动附带分析范围与候选工况。直接描述分析目的；缺失的材料、载荷或安装条件由助手询问。</small>}
+      <label className="conversation-input"><span className="sr-only">你的消息</span><textarea aria-label="对话消息" rows={3} value={text} placeholder={analysisMode ? "例如：分析支撑柱的横向变形，先帮我确定工况…" : "描述模型，或提出修改…"} onChange={event => setText(event.target.value)} onKeyDown={event => {
         if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); }
       }} /></label>
       <div className="conversation-send"><button type="button" className="chat-model" onClick={onModel}>{provider?.model ?? '选择模型'}<ChevronDown size={12} /></button><div>

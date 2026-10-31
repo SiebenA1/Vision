@@ -69,7 +69,7 @@ def planning_progress(task, turns, runtime_id=None):
             post_build = False
         elif post_build and tool in ('list_topology', 'inspect_geometry', 'check_modeling'):
             post_build_reads += 1
-        if tool in ('native_api', 'preview_build', 'list_topology', 'inspect_geometry'):
+        if tool in ('native_api', 'preview_build', 'list_topology', 'inspect_geometry', 'analysis_context'):
             preparation_steps += 1
         if tool == 'preview_build':
             previews += 1
@@ -85,9 +85,11 @@ def planning_progress(task, turns, runtime_id=None):
             symbols = known_symbols(turn)
             stale = 0 if symbols - seen else stale + 1
             seen.update(symbols)
-        elif tool in ('preview_build', 'read_script', 'read_source', 'read_tool_result', 'list_topology', 'inspect_geometry', 'search_sources', 'set_modeling_requirements', 'check_modeling'):
+        elif tool in ('preview_build', 'read_script', 'read_source', 'read_tool_result', 'list_topology', 'inspect_geometry', 'analysis_context', 'search_sources', 'set_modeling_requirements', 'check_modeling'):
             arguments = {key: value for key, value in value.get('arguments', {}).items()
                          if key not in ('command_id', 'idempotency_key', 'expected_head')}
+            if tool == 'analysis_context':
+                arguments.pop('limit', None)  # Different limits yielding the same page are not new information.
             if tool == 'preview_build':
                 arguments.pop('expected_impact_digest', None)
                 try:
@@ -98,7 +100,7 @@ def planning_progress(task, turns, runtime_id=None):
                                 'revision': turn.get('revision'),
                                 'receipt': {} if tool == 'preview_build' else json.loads(turn.get('receipt') or '{}')})
             repeated[signature] = repeated.get(signature, 0) + 1
-            if repeated[signature] >= 3:
+            if repeated[signature] >= (2 if tool == 'analysis_context' else 3):
                 blocked.add(tool)
     if stale >= 3:
         blocked.add('native_api')
@@ -230,6 +232,8 @@ def next_step(runner, task, turns, config):
             if item['tool'] == 'build_geometry' and compiled['project'].get('geometry') and not compiled.get('latest_build_preview'):
                 raise CadScriptError('现有模型尚无当前版本、当前轮次的有效预检。本轮未提交作业。请先 preview_build，再 build_geometry({})。')
             if compiled['planning_progress']['recovery_required']:
+                if compiled.get('workflow_phase') == 'analysis' or compiled.get('analysis_candidate'):
+                    raise CadScriptError('检测到工况信息重复读取，本轮未执行工具。请复用 analysis_setup 配置工况，或一次询问缺少的物理条件。')
                 raise CadScriptError('检测到接口查询或协议纠正持续空转，本轮未执行工具。请使用已知能力完成下一步预检/构建，或如实说明具体阻碍。')
             raise CadScriptError('tool was not offered for this request; use only the offered tools and current workflow stage')
         arguments = prepare(task, item, turns, runner.workspace)

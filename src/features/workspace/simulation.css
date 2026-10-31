@@ -14,6 +14,41 @@
 .simulation-config textarea { font-family: monospace; }
 .simulation-config > button { margin-bottom: 8px; }
 .desktop-workspace .study-warning { color: var(--bad); }
+.simulation-review { border-block: 1px solid var(--line); padding: 12px 0; margin: 12px 0; overflow-wrap: anywhere; }
+.simulation-review article { border-top: 1px solid var(--line); padding: 10px 0; }
+.simulation-review strong { font-size: 12px; }
+.simulation-review button { font-size: 11px; }
+.simulation-status { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
+.simulation-status span { background: var(--hover); border: 1px solid var(--line); border-radius: 6px; padding: 6px 9px; font-size: 12px; }
+.simulation-viewport-note { position: absolute; bottom: 55px; left: 12px; right: 12px; width: fit-content; max-width: calc(100% - 24px); background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; pointer-events: none; }
+.core-results dd + button { font-size: 11px; margin-bottom: 8px; }
+.core-study-form h3 { font-size: 14px; margin: 22px 0 6px; }
+.core-study-form > details { margin: 12px 0; padding: 10px 0; border-block: 1px solid var(--line); }
+.core-study-form summary { font-size: 12px; cursor: pointer; }
+.core-study-form small { display: block; font-size: 11px; line-height: 1.6; color: var(--muted); margin: 5px 0; }
+.study-boundary-card { margin: 12px 0; padding: 12px; border: 1px solid var(--line); border-left: 3px solid #2998df; border-radius: 8px; overflow-wrap: anywhere; }
+.study-boundary-card:has(select[aria-label$="施力方向"]) { border-left-color: #e34646; }
+.study-boundary-card header { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px; font-size: 12px; }
+.study-boundary-card header span { color: var(--muted); font-size: 11px; }
+.desktop-workspace .study-boundary-card > header { min-height: 0; padding: 0; margin: 0; background: transparent; border: 0; }
+.desktop-workspace .study-boundary-card > header strong { font-size: 13px; }
+.study-card-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.study-card-actions button, .study-boundary-card > button { font-size: 11px; }
+.study-boundary-card details { margin-top: 12px; }
+.simulation-config .study-enabled { display: flex; align-items: center; gap: 8px; margin: 10px 0; }
+.simulation-config .study-enabled input { width: auto; margin: 0; }
+.study-remove { margin-top: 10px; color: var(--muted); }
+.study-pick-instruction { border: 1px solid #2998df; background: var(--hover); border-radius: 8px; padding: 12px; margin: 12px 0; font-size: 13px; }
+.study-pick-instruction button { margin: 4px 6px 0 0; }
+.selection-engineering-actions { border-block: 1px solid var(--line); margin: 10px 0; padding: 10px 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.selection-engineering-actions strong, .selection-engineering-actions small { flex-basis: 100%; }
+.study-scope { margin: 14px 0; padding: 12px; border: 1px solid var(--line); border-radius: 8px; }
+.study-scope h3 { font-size: 13px; margin: 0 0 8px; }
+.study-scope button { margin: 4px 4px 4px 0; font-size: 11px; }
+.simulation-review h3 { font-size: 13px; margin: 0 0 10px; }
+.study-manual { margin: 14px 0; padding: 12px 0; border-block: 1px solid var(--line); }
+.study-manual > summary { font-size: 12px; cursor: pointer; }
+.analysis-chat-context { display: block; font-size: 11px; line-height: 1.6; color: var(--muted); margin-bottom: 8px; }
 .desktop-workspace .core-field-legend { top: 55px; bottom: auto; left: 12px; right: 12px; max-width: 360px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel); color: var(--ink); display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 5px 10px; font-size: 10px; line-height: 1.5; }
 .desktop-workspace .core-field-legend strong { font-weight: 500; }
 .desktop-workspace .core-field-legend .core-color-ramp { align-self: center; height: 7px; }

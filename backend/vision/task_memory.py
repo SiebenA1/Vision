@@ -17,6 +17,8 @@ def current_receipt(rows, revision, tool, receipt):
     """Revalidate copied source text, not only new retrieval results."""
     def eligible(source):
         return source in rows and available(rows, source) and context_eligible(rows, source, revision)
+    if tool == 'analysis_context' and (receipt.get('revision_id') != revision['revision_id'] or receipt.get('artifact_id') != revision['document'].get('geometry')):
+        return {'context_status': 'stale_analysis_context', 'meaning': 'Read analysis_context again for current geometry and study.'}
     if receipt.get('modeling_check'):
         receipt = {**receipt, 'modeling_check':current_receipt(rows, revision, 'check_modeling', receipt['modeling_check'])}
     if tool in ('read_code_module','read_code_assembly','register_code_module','patch_code_module'):
@@ -64,7 +66,7 @@ def observation(turn, receipt):
     encoded = packed(receipt)
     result = {'turn_id': turn['id'], 'tool': response.get('tool'), 'state': turn['state'],
               'revision_id': turn['revision'], 'epoch': turn['epoch'],
-              'error': (turn.get('error') or '')[:2000], 'truncated': len(encoded) > 2000,
+              'error': (turn.get('error') or '')[:2000], 'truncated': len(encoded) > (6000 if response.get('tool') in ('solve', 'analysis_context') else 2000),
               'read_tool_result': {'turn_id': turn['id'], 'offset': 0, 'limit': 4000}}
     if result['truncated']:
         result.update(receipt_excerpt=encoded[:1000] + '\n…\n' + encoded[-500:],
@@ -238,8 +240,31 @@ def context(workspace, task, turns, budget=60000):
         while len(packed(focus['module_catalog']))>2600 and len(focus['module_catalog'])>1:focus['module_catalog'].pop()
     if latest_receipt and 'geometry_summary' in latest_receipt and latest_receipt['geometry_summary'].get('artifact_id') == document.get('geometry'):
         latest_receipt = {key:value for key,value in latest_receipt.items() if key != 'geometry_summary'} | {'geometry_summary_in':'task_focus.geometry_summary'}
+    latest_solve = next((turn for turn in reversed(observations) if turn['state'] == 'succeeded' and json.loads(turn['response']).get('tool') == 'solve'), None)
+    solve_evidence = None
+    if latest_solve:
+        from .task_tools import analysis_receipt
+        solve_receipt = json.loads(latest_solve.get('receipt') or '{}')
+        if solve_receipt.get('job', {}).get('state') == 'succeeded':
+            solve_evidence = {**analysis_receipt(solve_receipt['job'], solve_receipt.get('reused', False)),
+                              'current_revision': latest_solve['revision'] == task['revision'], 'epoch': latest_solve['epoch'], 'turn_id': latest_solve['id']}
+            if not solve_evidence['current_revision']:
+                solve_evidence['next_action'] = 'Historical result: the project revision changed. Verify current physical inputs before reusing or solving.'
+    setup_turn = next((turn for turn in reversed(observations) if turn['state'] == 'succeeded'
+                       and turn['epoch'] == task['epoch'] and turn['revision'] == task['revision']
+                       and json.loads(turn['response']).get('tool') == 'analysis_context'), None)
+    analysis_setup = None
+    if setup_turn:
+        setup = json.loads(setup_turn.get('receipt') or '{}')
+        if setup.get('artifact_id') == document.get('geometry'):
+            analysis_setup = {key: value for key, value in setup.items() if key not in ('candidate_study', 'saved_study')}
+            analysis_setup.update(epoch=task['epoch'], turn_id=setup_turn['id'])
+            if latest and latest['id'] == setup_turn['id']:
+                latest_receipt = {'data_in': 'analysis_setup', 'already_read': True,
+                                  'next_face_offset': setup.get('next_face_offset')}
     result = {"revision_id": task["revision"], "epoch": task["epoch"], "statement": statement,
-        'task_focus': focus,
+        'task_focus': focus, 'latest_analysis': solve_evidence,
+        'analysis_setup': analysis_setup,
         'model_completion_state': completion_state,
         'cad_capability_index': capability_index,
         'current_reference': {**reference, 'current_geometry': reference.get('artifact_id') == document.get('geometry')} if reference else None,
@@ -249,6 +274,8 @@ def context(workspace, task, turns, budget=60000):
         'context_omissions': {},
         "latest_build_preview": preview_state,
         "statement_source_id": task["source"], "project": document,
+        'analysis_candidate': {'study': source['analysis_draft'], 'current_revision': source.get('revision_id') == task['revision'],
+                               'authority': 'UI candidate settings, not confirmation of actual material/load/mounting.'} if source.get('analysis_draft') else None,
         "long_term_memory": [], "stage_memory": [], "historical_sources": [], "recent_tool_groups": [],
         "conversation_messages": [], "cad_api_reference": [], "cad_api_signatures": [], "retained_user_instructions": instructions}
     # One active edit input may be necessary across intervening API queries.
@@ -285,7 +312,8 @@ def context(workspace, task, turns, budget=60000):
     shares = {"recent_tool_groups": .30, "long_term_memory": .15, "stage_memory": .06,
               "historical_sources": .10, "conversation_messages": .14, "cad_api_reference": .16, "cad_api_signatures": .09}
     recent_tools = [json.loads(turn["response"] or "{}").get("tool") for turn in reversed(turns) if turn["epoch"] == task["epoch"] and turn["state"] == "succeeded"]
-    phase = "analysis" if next((tool for tool in recent_tools if tool not in ("remember", "search_sources", "read_source")), None) in ("configure_study", "solve", "assessment", "beam_reference", "solver_validation") else "modeling"
+    phase = "analysis" if next((tool for tool in recent_tools if tool not in ("remember", "search_sources", "read_source", "read_tool_result", "list_topology", "inspect_geometry")), None) in ("analysis_context", "configure_study", "solve", "assessment", "beam_reference", "solver_validation") else "modeling"
+    result['workflow_phase'] = phase
     if phase == "analysis":
         shares = {"recent_tool_groups":.40,"long_term_memory":.20,"stage_memory":.05,"historical_sources":.13,
                   "conversation_messages":.17,"cad_api_reference":.03,"cad_api_signatures":.02}

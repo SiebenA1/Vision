@@ -419,7 +419,7 @@ class InspectGeometry(Contract):
 
 
 class TaskStep(Contract):
-    tool: Literal["preview_build", "build_geometry", "configure_study", "solve", "assessment", "search_sources", "remember", "read_source", "read_tool_result", "read_script", "inspect_geometry", "list_topology", "ask_user", "native_api", "beam_reference", "solver_validation", "finish", 'set_modeling_requirements', 'check_modeling', 'register_code_module', 'search_code_modules', 'read_code_module', 'patch_code_module','read_code_assembly']
+    tool: Literal["preview_build", "build_geometry", "configure_study", "solve", "assessment", "search_sources", "remember", "read_source", "read_tool_result", "read_script", "inspect_geometry", "list_topology", "ask_user", "native_api", "analysis_context", "beam_reference", "solver_validation", "finish", 'set_modeling_requirements', 'check_modeling', 'register_code_module', 'search_code_modules', 'read_code_module', 'patch_code_module','read_code_assembly']
     arguments: dict = Field(default_factory=dict)
 
 
@@ -442,12 +442,30 @@ class CreateModelTask(Edit):
     unlimited: bool = True
 
 
+class StudyDraft(Contract):
+    """A bounded UI candidate, allowed to lack supports/loads; never solver admission."""
+    material: Material
+    supports: list[Support] = Field(default_factory=list, max_length=64)
+    loads: list[Load] = Field(default_factory=list, max_length=64)
+    mesh_size: float = Field(default=4, gt=0, le=10000)
+    body_ids: list[Annotated[str, Field(pattern=r'^body-[0-9]+$')]] | None = Field(default=None, min_length=1, max_length=64)
+    body_artifact_id: Digest | None = None
+
+
 class ConversationMessage(Edit):
     text: str = Field(min_length=1, max_length=16000, pattern=r"\S")
     expected_task: Identity | None = None
     expected_epoch: int | None = Field(default=None, ge=1)
     artifact_id: str | None = None
     selection: list[TopologyId] = Field(default_factory=list, max_length=64)
+    analysis_draft: StudyDraft | None = None
+
+    @field_validator('analysis_draft')
+    @classmethod
+    def bounded_analysis_draft(cls, value):
+        if value and len(json.dumps(value.model_dump(exclude_none=True), ensure_ascii=False)) > 10000:
+            raise ValueError('analysis draft is too large; simplify the study first')
+        return value
 
 
 class CorrectModelTask(CreateModelTask):

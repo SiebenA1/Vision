@@ -406,7 +406,8 @@ def _solve_impl(
             raise ValueError(f"empty boundary region: {item.get('name', item.get('face', 'custom'))}")
         return nodes, selected
 
-    fixed_sets = [region_nodes(item)[0] for item in active_supports]
+    fixed_regions = [region_nodes(item) for item in active_supports]
+    fixed_sets = [region[0] for region in fixed_regions]
     fixed_nodes = nm.unique(nm.concatenate(fixed_sets))
     # Every disconnected component requires sufficient constraints; never silently bond parts.
     from scipy.sparse import coo_matrix
@@ -423,9 +424,16 @@ def _solve_impl(
     boundary_evidence = []
     applied = nm.zeros(3)
     area = 0.0
+    def boundary_display(item, nodes, selected):
+        # Bounded point markers are a sample, never a replacement for mesh topology.
+        sample = nodes[nm.linspace(0, len(nodes) - 1, min(192, len(nodes)), dtype=int)]
+        return {"id": item.get("id"), "center": points[nodes].mean(axis=0).tolist(),
+                "displayNodes": points[sample].tolist(), "displaySampled": len(nodes) > 192,
+                "facets": len(selected), "areaMm2": sum(_triangle_area(points, tri) for tri in selected)}
     for index, nodes in enumerate(fixed_sets):
         key = f"Fixed{index}"
-        boundary_evidence.append({"kind": "support", "name": active_supports[index].get("name", key), "nodes": len(nodes)})
+        boundary_evidence.append({"kind": "support", "name": active_supports[index].get("name", key), "nodes": len(nodes),
+                                  **boundary_display(active_supports[index], nodes, fixed_regions[index][1])})
     for index, load in enumerate(active_loads):
         nodes, selected = region_nodes(load, load=True)
         if nm.intersect1d(nodes, fixed_nodes).size:
@@ -440,7 +448,7 @@ def _solve_impl(
         for tri in selected:
             nodal_forces[tri] += force * (_triangle_area(points, tri) / selected_area / 3)
         boundary_evidence.append({"kind": "load", "name": load.get("name", f"Load{index}"), "nodes": len(nodes),
-                                  "facets": len(selected), "areaMm2": selected_area, "force": force.tolist()})
+                                  **boundary_display(load, nodes, selected), "force": force.tolist()})
     E, nu = float(material["E"]), float(material["nu"])
     import time
     from skfem import MeshTet, Basis, ElementTetP1, ElementVector, asm, condense, solve as solve_linear
@@ -555,6 +563,8 @@ def _solve_impl(
         "maxVonMises": max_vm,
         "maxVonMisesLocation": [float(v) for v in vtk_points[imax]],
         "maxDisplacement": float(disp_mag[dmax]),
+        "maxDisplacementDisplacement": u[dmax].tolist(),
+        "maxVonMisesDisplacement": u[imax].tolist(),
         "maxDisplacementLocation": [float(v) for v in vtk_points[dmax]],
         "safetyFactor": yield_strength / max_vm if max_vm > 1e-9 else 1e9,
         "positions": nm.asarray(vtk_points, dtype=nm.float32).ravel().tolist(),

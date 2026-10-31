@@ -82,7 +82,8 @@ def send(tasks, project, request):
                 "AND json_extract(response,'$.tool')='ask_user' ORDER BY ordinal DESC LIMIT 1", (task, current['epoch'])).fetchone()
             reply_to = previous_question[0] if previous_question else None
         db.execute("UPDATE sources SET payload=? WHERE id=?", (packed({**payload, "conversation": True,
-            "reference": reference, "revision_id": revision["revision_id"], "reply_to_turn_id": reply_to}), source))
+            "reference": reference, "revision_id": revision["revision_id"], "reply_to_turn_id": reply_to,
+            "analysis_draft": request.get('analysis_draft')}), source))
         if current:
             # Retain actual usage across messages. A new instruction changes epoch, not history.
             previous = json.loads(current["config"])

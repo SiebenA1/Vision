@@ -3,7 +3,7 @@ import json
 import ast
 
 from pydantic import Field, model_validator
-from typing import Literal
+from typing import Annotated, Literal
 from .contracts import Build, ConfigureStudy, Contract, InspectGeometry, Pick, Solve, TopologyId, Remember, Identity, BeamReference, SetModelingRequirements
 from .changes import preview_build
 from .assessment import assess
@@ -15,6 +15,17 @@ from .contracts import RegisterCodeModule, SearchCodeModules, ReadCodeModule, Ed
 
 class CadScriptError(ValueError):
     pass
+
+
+def analysis_receipt(job, reused=False):
+    """Give the planner numerical evidence, not thousands of viewport marker coordinates."""
+    summary = dict((job.get('result') or {}).get('summary') or {})
+    summary['boundaries'] = [{key: item[key] for key in ('id', 'kind', 'name', 'nodes', 'facets', 'areaMm2', 'force') if key in item}
+                             for item in summary.get('boundaries', [])]
+    return {'job': {key: job.get(key) for key in ('id', 'kind', 'state', 'revision', 'error')} |
+                   {'result': {'artifact_id': (job.get('result') or {}).get('artifact_id'), 'summary': summary}},
+            'origin': 'verified_tool_receipt', 'reused': reused,
+            'next_action': 'Read assessment once and finish with these results. Do not solve unchanged inputs again. Refine only for a stated accuracy comparison.'}
 
 
 def validate_box_calls(script):
@@ -108,6 +119,12 @@ class Selection(Contract):
         return self
 
 
+class AnalysisContext(Contract):
+    body_ids: list[Annotated[str, Field(pattern=r"^body-[0-9]+$")]] | None = Field(default=None, min_length=1, max_length=64)
+    offset: int = Field(default=0, ge=0, le=1000000)
+    limit: int = Field(default=24, ge=1, le=48)
+
+
 class TopologyPage(Contract):
     query: str = Field(default="", max_length=200)
     offset: int = Field(default=0, ge=0, le=1000000)
@@ -162,7 +179,7 @@ class ReadCodeAssembly(Contract):
 
 
 TOOL_MODELS = {"preview_build": Build, "build_geometry": Build, "configure_study": ConfigureStudy,
-    "solve": Solve, "assessment": Contract, "beam_reference": BeamReference, "solver_validation": Contract, "search_sources": Query, "remember": Remember, "ask_user": Question,
+    "solve": Solve, "assessment": Contract, "analysis_context": AnalysisContext, "beam_reference": BeamReference, "solver_validation": Contract, "search_sources": Query, "remember": Remember, "ask_user": Question,
     "read_source": SourceRange, "read_tool_result": ToolResultRange, "read_script": ScriptRange,
     "inspect_geometry": Selection, "list_topology": TopologyPage, "native_api": ApiQuery, "finish": Finish,
     'set_modeling_requirements': SetModelingRequirements, 'check_modeling': Contract,
@@ -198,6 +215,7 @@ def tool_schemas():
                 'read_code_assembly':'Read a bounded slice or one component of the current exact assembly plan, including parameter and placement bindings. No Python code is replayed.',
                 "list_topology": "List current artifact's body/face/edge IDs, bounding boxes and geometric metrics; paginated. Use before querying unknown topology IDs.",
                 "inspect_geometry": "Measure explicit IDs from list_topology, or resolve a known point; this does not list or discover all topology.",
+                "analysis_context": "Read the current static-analysis scope, exact face IDs/bounds/areas, saved study, conflicts, supported physics and missing physical inputs. Call before planning a static study. Optional body_ids selects planning scope without saving it; paginate faces with offset/limit. No solver or model is run.",
                 "configure_study": "Configure material, fixed supports and total-force loads. face=x-min/x-max/y-min/y-max/z-min/z-max selects bounding faces; precise regions are optional.",
                 "preview_build": "Preview edits to existing geometry. Prefer parameters={existing_name:value}, or script_edits=[{old_text:'exact unique snippet',new_text:'replacement'}] with base_script_sha256 for local code changes; omit script/use_current/replay_of. Reuses saved code and original inputs; never guesses a replacement target. Read a bounded range if needed. Full script only for a full redesign. After preview call build_geometry({}).",
                 "assessment": "Read deterministic engineering evidence; missing evidence is unknown.",
@@ -325,6 +343,16 @@ def execute(workspace, queries, task, tool, arguments):
         if tool=='read_code_module':return code_modules.read(workspace,project,arguments)
         if tool=='read_code_assembly':return code_modules.read_assembly(workspace,project,arguments)
         return code_modules.search(workspace,project,arguments)
+    if tool == 'analysis_context':
+        from .analysis_context import analysis_context
+        document = workspace.revision(project, task['revision'])['document']
+        source = {}
+        if task.get('source'):
+            with workspace.db() as db:
+                row = db.execute('SELECT payload FROM sources WHERE id=? AND project=?', (task['source'], project)).fetchone()
+            source = json.loads(row[0]) if row else {}
+        candidate = source.get('analysis_draft') if source.get('revision_id') == task['revision'] else None
+        return analysis_context(workspace, document, task['revision'], candidate=candidate, **arguments)
     if tool == "beam_reference":
         from .verification import beam_reference
         return beam_reference(arguments)
@@ -338,10 +366,19 @@ def execute(workspace, queries, task, tool, arguments):
             raise ValueError("preview existing geometry changes before submitting a build")
         return workspace.enqueue(project, arguments, "cad", fence=fence)
     if tool == "solve":
+        if json.loads(task.get('config') or '{}').get('mode') == 'deepseek/1':
+            evidence = assess(workspace, project, task['revision'])
+            if evidence.get('evidence_job_id'):
+                return analysis_receipt(workspace.job(evidence['evidence_job_id']), reused=True)
         return workspace.enqueue(project, arguments, "fea", fence=fence)
     if tool == "configure_study":
-        return workspace.edit(project, arguments, lambda db, document: {
-            **document, "study": configure_study(workspace, document, arguments["study"])}, fence=fence)
+        def configure(db):
+            current = workspace._revision(db, project)
+            study = configure_study(workspace, current['document'], arguments['study'])
+            if packed(study) == packed(current['document'].get('study')):
+                return {**current, 'unchanged': True}
+            return workspace._commit(db, project, current['revision_id'], {**current['document'], 'study': study})
+        return workspace.command(project, arguments, configure, fence=fence)
     if tool == "assessment":
         return assess(workspace, project, task["revision"])
     if tool == "search_sources":

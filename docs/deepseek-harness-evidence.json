@@ -1,0 +1,84 @@
+{
+  "scope": "Current working tree; offline probes use no user workspace data.",
+  "scheduler": {
+    "actual_method": "Tasks.loop",
+    "step_body": "event-controlled fake model wait",
+    "second_task_blocked_during_first_wait": true,
+    "second_task_proceeded_after_release": true,
+    "observation_window_ms": 150
+  },
+  "schemas": {
+    "iterations": 40,
+    "tools": 25,
+    "all_schema_characters": 29944,
+    "system_base_characters": 12738,
+    "schema_generation_p50_ms": 18.054,
+    "schema_generation_max_ms": 24.719,
+    "meaning": "All registered schemas, not a representative filtered request or provider token count."
+  },
+  "historical_intervals": [
+    {
+      "task_id": "c2a9df50bb3b4044bf160ce6582d987d",
+      "recorded_model_seconds": 959.155,
+      "recorded_cad_queue_and_execution_seconds": 29.428,
+      "meaning": "Historical recorded intervals; not current end-to-end wall time or an A/B benchmark."
+    },
+    {
+      "task_id": "c638e484727d4e53952fe136daf68f45",
+      "recorded_model_seconds": 967.778,
+      "recorded_cad_queue_and_execution_seconds": 11.604,
+      "meaning": "Historical recorded intervals; not current end-to-end wall time or an A/B benchmark."
+    },
+    {
+      "task_id": "cb0de12b26b245b383d2169c0bbb92d0",
+      "recorded_model_seconds": 32.231,
+      "recorded_cad_queue_and_execution_seconds": 0.845,
+      "meaning": "Historical recorded intervals; not current end-to-end wall time or an A/B benchmark."
+    }
+  ],
+  "reviewed_at": "2026-10-31",
+  "upstream": {
+    "repository": "deepseek-ai/deepseek-harness",
+    "commit": "ce7073d51254c26cd63b22a60835b8f948deb447",
+    "tree_truncated": false,
+    "downloaded_files": 132,
+    "git_blob_hash_mismatches": [],
+    "upstream_tests_run": false
+  },
+  "local": {
+    "head": "3477957e47a502e159678c588f2e9bba6d764104",
+    "includes_preexisting_uncommitted_changes": true,
+    "production_code_changed": false,
+    "remote_model_calls": 0
+  },
+  "regression": {
+    "modules": [
+      "test_context_efficiency_v2",
+      "test_provider_response_v2",
+      "test_agent_orchestration_v2",
+      "test_post_build_verification_v2",
+      "test_tasks_v2",
+      "test_model_tasks_v2",
+      "test_modeling_recovery_v2",
+      "test_context_memory_v2",
+      "test_fast_iteration_v2",
+      "test_api_lookup_v2",
+      "test_retrieval_focus_v2",
+      "test_analysis_context_v2"
+    ],
+    "tests": 105,
+    "passed": 102,
+    "skipped": 3,
+    "failures": 0,
+    "errors": 0,
+    "seconds": 80.124,
+    "execution": "Normal host execution; isolated test workspaces; no remote provider calls",
+    "initial_sandbox_run": {
+      "tests": 105,
+      "failures": 1,
+      "errors": 27,
+      "skipped": 3,
+      "environment_issue": "_ssl and _ctypes DLL loading failed; same suite passed on normal host rerun"
+    }
+  }
+}

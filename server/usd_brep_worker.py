@@ -8,6 +8,7 @@ tessellator.
 from __future__ import annotations
 
 import base64
+import ast
 import json
 import math
 import struct
@@ -126,6 +127,58 @@ def _bbox(item):
             "size": [float(hi[i] - lo[i]) for i in range(3)]}
 
 
+class ConsumedCadHandleError(ValueError):
+    pass
+
+
+def _script_execution(script):
+    """Check actual handle identity across aliases, branches and loop iterations."""
+    consumed = {}
+    booleans = (usd_brep.boolean_union, usd_brep.boolean_difference, usd_brep.boolean_intersection)
+    native_functions = {id(value) for value in vars(usd_brep).values() if callable(value) and not isinstance(value, type)}
+
+    def check(value):
+        if isinstance(value, usd_brep.Brep):
+            if id(value) in consumed:
+                raise ConsumedCadHandleError('布尔运算已消耗此 CAD 对象；模板必须在第一次布尔运算前复制，每次运算使用独立副本（u.brep_copy(template)）。')
+        elif isinstance(value, (list, tuple)):
+            for item in value:
+                check(item)
+        elif isinstance(value, dict):
+            for item in value.values():
+                check(item)
+
+    def checked_function(function):
+        owner = getattr(function, '__self__', None)
+        if id(function) not in native_functions and not isinstance(owner, usd_brep.Brep):
+            return function  # Keep Python calls such as locals()/exec() in their original frame.
+
+        def call(*args, **kwargs):
+            check(owner)
+            check(args)
+            check(kwargs)
+            result = function(*args, **kwargs)
+            if any(function is operation for operation in booleans):
+                for value in (*args, *kwargs.values()):
+                    if isinstance(value, usd_brep.Brep):
+                        consumed[id(value)] = value  # Retain wrappers so identities cannot be recycled.
+            # The binding may recycle a native address and its Python wrapper for a new live body.
+            if isinstance(result, usd_brep.Brep):
+                consumed.pop(id(result), None)
+            return result
+        return call
+
+    class Calls(ast.NodeTransformer):
+        def visit_Call(self, node):
+            self.generic_visit(node)
+            node.func = ast.copy_location(ast.Call(func=ast.Name(id='__vision_checked_call__', ctx=ast.Load()),
+                                                  args=[node.func], keywords=[]), node.func)
+            return node
+
+    tree = Calls().visit(ast.parse(script, filename='<usd-brep-script>'))
+    return compile(ast.fix_missing_locations(tree), '<usd-brep-script>', 'exec'), checked_function, check
+
+
 def execute(script, density, options=None, source_usd=None, source_breps=None):
     import hashlib
     import importlib.metadata
@@ -147,8 +200,10 @@ def execute(script, density, options=None, source_usd=None, source_breps=None):
     namespace = {"__name__": "__vision_usd_brep__", "u": usd_brep, "parts": parts,
                  "parameters": parameters, "params": parameters}
     if script.strip():
-        exec(compile(script, "<usd-brep-script>", "exec"), namespace, namespace)
+        code, namespace['__vision_checked_call__'], check = _script_execution(script)
+        exec(code, namespace, namespace)
         result = namespace.get("result")
+        check(result)
     else:
         result = parts
     if isinstance(result, usd_brep.Brep):
@@ -309,7 +364,8 @@ def main():
                               request.get("options", {}), request.get("source_usd"), request.get("source_breps"))
         output.write_text(json.dumps(payload, ensure_ascii=False, allow_nan=False), encoding="utf-8")
     except Exception as exc:
-        script_error = (any(frame.filename == '<usd-brep-script>' for frame in traceback.extract_tb(exc.__traceback__))
+        script_error = (isinstance(exc, ConsumedCadHandleError)
+                        or any(frame.filename == '<usd-brep-script>' for frame in traceback.extract_tb(exc.__traceback__))
                         or isinstance(exc, SyntaxError) and exc.filename == '<usd-brep-script>')
         output.write_text(json.dumps({"error": str(exc), "trace": traceback.format_exc(limit=12),
             'error_kind': 'cad_script' if script_error and not isinstance(exc, (OSError, MemoryError)) else 'native_failure'}), encoding="utf-8")

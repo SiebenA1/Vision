@@ -1,5 +1,7 @@
 # VISION architecture
 
+> 当前 v2 的详细架构、Agent / LLM 时序、数据流、三套状态机和持久化关系，请阅读 [当前实现 Mermaid 图集](architecture-current.md)。以下保留历史 v1 说明，不能用于推断当前 v2 的状态管理、作业取消和对话持久化行为。
+
 Updated 2026-10-19. The engineering loop is intent → editable native geometry → explicit study → deterministic calculation → evidence → revision.
 
 The sections below describe the historical v1 workbench; its unused React UI has

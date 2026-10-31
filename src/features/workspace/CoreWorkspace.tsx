@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { Box, BrainCircuit, Calculator, FlaskConical, ChevronRight, FolderOpen, History, Layers3, ListTree, MessageSquare, PanelLeftClose, PanelLeftOpen, Plus, Search, Settings2, SlidersHorizontal, Workflow, X } from 'lucide-react';
 import { activeJob, coreArtifactUrl, coreCommand, coreRequest, type CoreAssessment, type CoreBuildImpact, type CoreInspection, type CoreJob, type CorePick, type CoreRequirement, type CoreRevision, type CoreStudy } from './api';
 import { CoreViewport } from './CoreViewport';
@@ -12,6 +12,8 @@ import { objectLabel } from './viewHelpers';
 import type { ResultField } from './fields';
 import { VerificationPanel } from './VerificationPanel';
 import { StudyForm } from './StudyForm';
+import { SimulationReview } from './SimulationReview';
+import { applySelectedFaces, setAnalysisBodies, studyMarkers, forceComponents, requirementStatus, type BoundaryEvidence, type BoundaryPreview } from './simulationHelpers';
 import { ComparisonPanel } from './ComparisonPanel';
 import { useEditorDrafts, draftPrefix, type EditorDraft } from './drafts';
 
@@ -33,7 +35,7 @@ const metrics = { maxDisplacement: ['最大位移', 'mm'], maxVonMises: ['von Mi
 interface TopologyManifest {
   artifactId: string;
   replay_available?: boolean; parameters: Record<string, number | string | boolean>; settings: { tolerance_mm: number; angle_deg: number };
-  bodies: Array<{ id: string; name: string; kind: 'solid' | 'sheet'; faces: Array<{ id: string; area_mm2: number }>; edges: Array<{ id: string; length_mm: number }> }>;
+  bodies: Array<{ id: string; name: string; kind: 'solid' | 'sheet'; bbox_mm?: { min: number[]; max: number[] }; faces: Array<{ id: string; area_mm2: number; bbox_mm?: { min: number[]; max: number[] } }>; edges: Array<{ id: string; length_mm: number }> }>;
 }
 function DraftVersion({ base, current, rebase }: { base: string | null; current: string; rebase: () => void }) {
   return base && base !== current ? <div className="core-error" role="status">这份草稿来自旧版本，请核对当前工程再继续。<button onClick={rebase}>以当前版本继续编辑</button></div> : null;
@@ -79,6 +81,13 @@ export default function CoreWorkspace() {
   const [pickReset, setPickReset] = useState(0);
   const [field, setField] = useState<ResultField | 'geometry'>('geometry');
   const [deformation, setDeformation] = useState(0);
+  const [boundaryPreview, setBoundaryPreview] = useState<(BoundaryPreview & { revision: string; draft?: { kind: 'support' | 'load'; index: number } }) | null>(null);
+  const [automaticMarkers, setAutomaticMarkers] = useState<BoundaryPreview[]>([]);
+  const [showStudyMarkers, setShowStudyMarkers] = useState(true);
+  const [markerError, setMarkerError] = useState('');
+  const [markerRefresh, setMarkerRefresh] = useState(0);
+  const [pendingRegion, setPendingRegion] = useState<{ kind: 'support' | 'load'; index?: number; revision: string } | null>(null);
+  const [hotspot, setHotspot] = useState<{ point: number[]; displacement?: number[]; label: string; token: number; artifact: string } | null>(null);
   const queryEpoch = useRef(0);
   const [workspacePage, setWorkspacePage] = useState<'model' | 'simulation' | 'verification'>('model');
   const requirementPanel = useRef<HTMLDetailsElement>(null);
@@ -148,7 +157,7 @@ export default function CoreWorkspace() {
     setDraftOwner(selected);
     setError('');
     setReplaySource(null);
-    setField('geometry'); setDeformation(0);
+    setField('geometry'); setDeformation(0); setBoundaryPreview(null); setHotspot(null); setPendingRegion(null);
     setPickMode('face');
     setImpact(null);
     if (!selected) return;
@@ -196,7 +205,46 @@ export default function CoreWorkspace() {
   const latestAnalysis = jobs.find(job => job.kind === 'fea' && job.revision === head?.revision_id);
   const currentEvidence = result && validAssessment?.evidence_job_id === result.id;
   const displayResult = currentEvidence && result.result && field !== 'geometry' ? { artifact: result.result.artifact_id, field, scale: deformation } : null;
+  const boundaryEvidence = currentEvidence && Array.isArray(result?.result?.summary?.boundaries) ? result.result.summary.boundaries as BoundaryEvidence[] : [];
   const geometry = head?.document.geometry ?? null;
+  const visibleBoundary = useMemo(() => {
+    if (!boundaryPreview?.draft) return boundaryPreview;
+    try {
+      const draft = JSON.parse(study) as CoreStudy;
+      const { kind, index } = boundaryPreview.draft;
+      const item = kind === 'support' ? draft.supports[index] : draft.loads[index];
+      if (!item || item.enabled === false) return null;
+      if (JSON.stringify(item.region) !== JSON.stringify(boundaryPreview.region)) return null;
+      return { ...boundaryPreview, region: item.region, face: item.face,
+        force: kind === 'load' ? forceComponents(draft.loads[index]) ?? undefined : undefined };
+    } catch { return null; }
+  }, [boundaryPreview, study]);
+  useEffect(() => {
+    setAutomaticMarkers([]); setMarkerError(''); setShowStudyMarkers(true);
+    if (workspacePage !== 'simulation' || studyDirty || !head?.document.study || !topology || topology.artifactId !== geometry) return;
+    const abort = new AbortController();
+    const epoch = ++queryEpoch.current;
+    const markers = studyMarkers(head.document.study, head.document, topology.bodies, boundaryEvidence);
+    setAutomaticMarkers(markers);
+    const pending = markers.filter(marker => !marker.evidence?.center && marker.region?.type === 'cad-face');
+    if (!pending.length) return;
+    setQueryBusy(true);
+    void (async () => {
+      for (const marker of pending) {
+        const region = marker.region;
+        if (region?.type !== 'cad-face') continue;
+        marker.lines = [];
+        for (let offset = 0; offset < region.faceIds.length; offset += 64) {
+          const data = await coreRequest<CoreInspection>(`/projects/${selected}/inspect`, { revision_id: head.revision_id, artifact_id: geometry, selection: region.faceIds.slice(offset, offset + 64) }, abort.signal);
+          if (abort.signal.aborted || queryEpoch.current !== epoch) return;
+          marker.lines.push(...data.visual.lines);
+        }
+      }
+      if (!abort.signal.aborted && queryEpoch.current === epoch) setAutomaticMarkers(markers.map(marker => ({ ...marker })));
+    })().catch(failure => { if (!abort.signal.aborted && queryEpoch.current === epoch) setMarkerError(`工况预览暂不可用：${String(failure)}`); })
+      .finally(() => { if (queryEpoch.current === epoch) setQueryBusy(false); });
+    return () => { abort.abort(); if (queryEpoch.current === epoch) setQueryBusy(false); };
+  }, [workspacePage, head?.revision_id, topology, studyDirty, currentEvidence, result?.result?.artifact_id, markerRefresh]);
   const currentGeometry = useRef(geometry); currentGeometry.current = geometry;
   const buildEditorKey = JSON.stringify([selected, head?.revision_id, scriptHead, script, parameters, tolerance, angle, buildMode, geometry, replaySource]);
   const currentImpact = impact?.editorKey === buildEditorKey ? impact : null;
@@ -239,11 +287,13 @@ export default function CoreWorkspace() {
     return () => abort.abort();
   }, [geometry]);
   const clearSelection = (message = '选择已清除。') => {
+    setBoundaryPreview(null); setHotspot(null); setShowStudyMarkers(false);
     queryEpoch.current++; setSelection([]); setInspection(null); setQueryBusy(false);
     setPickFeedback(message); setPickReset(value => value + 1);
   };
-  const inspectSelection = async (ids: string[], pick?: CorePick) => {
+  const inspectSelection = async (ids: string[], pick?: CorePick, preserveBoundary = false) => {
     if (!head || !topology || topology.artifactId !== geometry || queryBusy) return;
+    if (!preserveBoundary) { setBoundaryPreview(null); setHotspot(null); setShowStudyMarkers(false); }
     const epoch = ++queryEpoch.current, artifact = topology.artifactId;
     setQueryBusy(true); setError('');
     if (pick) { setSelection([]); setInspection(null); }
@@ -259,6 +309,83 @@ export default function CoreWorkspace() {
     } catch (failure) {
       if (queryEpoch.current === epoch && current.current === selected) { setError(String(failure)); setPickFeedback('对象识别失败，请重试。'); }
     } finally { if (queryEpoch.current === epoch) setQueryBusy(false); }
+  };
+  const previewBoundary = (kind: 'support' | 'load', index: number, source?: CoreStudy) => {
+    const sourceStudy = source ?? head?.document.study;
+    if (!head || !sourceStudy) return;
+    const item = kind === 'support' ? sourceStudy.supports[index] : sourceStudy.loads[index];
+    if (!item || item.enabled === false) return;
+    const region = item.region;
+    let ids: string[] = [];
+    if (region?.type === 'cad-face') {
+      if (region.artifactId !== geometry) { setError('区域已失效，请重新绑定当前几何。'); return; }
+      ids = region.faceIds;
+    } else if (region?.type === 'semantic-object') {
+      const object = head.document.objects?.find(object => object.id === region.object_id);
+      if (!object || object.binding.artifact_id !== geometry) { setError('对象已失效，请重新绑定当前几何。'); return; }
+      ids = object.binding.topology_ids;
+    }
+    const reuseInspection = ids.length > 0 && inspection?.artifact_id === geometry && [...ids].sort().join('|') === [...inspection.selection].sort().join('|') ? inspection : null;
+    clearSelection(); setField('geometry'); setHotspot(null);
+    const selectedBodies = topology?.bodies.filter(body => body.kind === 'solid' && (!sourceStudy.body_ids || sourceStudy.body_ids.includes(body.id)));
+    const boxes = selectedBodies?.map(body => body.bbox_mm).filter((box): box is { min: number[]; max: number[] } => !!box) ?? [];
+    const bounds = boxes.length && boxes.length === selectedBodies?.length ? {
+      min: [0, 1, 2].map(axis => Math.min(...boxes.map(box => box.min[axis]))),
+      max: [0, 1, 2].map(axis => Math.max(...boxes.map(box => box.max[axis]))),
+    } : undefined;
+    setBoundaryPreview({ revision: head.revision_id, kind, name: `${source ? '草稿 · ' : ''}${item.name || `${kind === 'support' ? '固定位置' : '施力'} ${index + 1}`}`,
+      ...(source ? { draft: { kind, index } } : {}),
+      region, face: item.face, bounds, force: kind === 'load' ? forceComponents(sourceStudy.loads[index]) ?? undefined : undefined,
+      evidence: source ? undefined : boundaryEvidence.find(value => value.kind === kind && value.id === item.id) });
+    if (reuseInspection) { setInspection(reuseInspection); setSelection(ids); setPickFeedback(`已选中 ${ids.length} 个面`); }
+    else if (ids.length) void inspectSelection(ids, undefined, true);
+  };
+  const freshStudy = (): CoreStudy => ({ material: { E: 210000, nu: .3, rho: 7850, yieldStrength: 235 }, supports: [], loads: [], mesh_size: 4 });
+  const setAnalysisScope = (ids: string[] | null) => {
+    if (!head || !geometry || !topology || topology.artifactId !== geometry || busy || queryBusy) return;
+    try {
+      if (studyDirty && studyHead !== head.revision_id) throw new Error('草稿来自旧版本，请先核对版本再修改分析范围。');
+      const source: CoreStudy = study.trim() ? JSON.parse(study) : head.document.study ?? freshStudy();
+      const next = setAnalysisBodies(source, ids, geometry, topology.bodies.filter(body => body.kind === 'solid').map(body => body.id));
+      setStudy(JSON.stringify(next, null, 2)); setStudyDirty(true); setStudyHead(head.revision_id);
+      setWorkspacePage('simulation'); setPendingRegion(null); setBoundaryPreview(null); setHotspot(null); setError('');
+    } catch (failure) { setError(failure instanceof Error ? failure.message : String(failure)); }
+  };
+  const scopeDraft = useMemo(() => {
+    try { return study.trim() ? JSON.parse(study) as CoreStudy : head?.document.study ?? null; }
+    catch { return null; }
+  }, [study, head?.document.study]);
+  const beginFacePick = (kind: 'support' | 'load', index?: number) => {
+    if (!head || !geometry || queryBusy || busy) return;
+    if (studyDirty && studyHead !== head.revision_id) { setError('草稿来自旧版本，请先核对版本再选择面。'); return; }
+    if (!study.trim()) { setStudy(JSON.stringify(head.document.study ?? freshStudy(), null, 2)); setStudyHead(head.revision_id); setStudyDirty(true); }
+    setPendingRegion({ kind, index, revision: head.revision_id }); setWorkspacePage('simulation');
+    setField('geometry'); setPickMode('face'); setBoundaryPreview(null); setHotspot(null); clearSelection('请点击模型表面；也可从对象列表多选面。');
+  };
+  const applyFaceSelection = (kind: 'support' | 'load', index?: number) => {
+    if (!head || !geometry || !topology || inspection?.artifact_id !== geometry || !selection.length) return;
+    try {
+      if ((studyDirty && studyHead !== head.revision_id) || (pendingRegion && pendingRegion.revision !== head.revision_id)) throw new Error('工程版本已变化，请先核对草稿再选面。');
+      const source = study.trim() ? JSON.parse(study) as CoreStudy : head.document.study ?? freshStudy();
+      const next = applySelectedFaces(source, kind, selection, geometry, Math.min(10, Math.max(.001, topology.settings.tolerance_mm * 2)), crypto.randomUUID(), index);
+      setStudy(JSON.stringify(next, null, 2)); setStudyDirty(true); setStudyHead(previous => previous ?? head.revision_id);
+      setWorkspacePage('simulation'); setPendingRegion(null); setObjectListOpen(false); setError('');
+      previewBoundary(kind, index ?? (kind === 'support' ? next.supports.length : next.loads.length) - 1, next);
+    } catch (failure) { setError(failure instanceof Error ? failure.message : String(failure)); }
+  };
+  const previewDraft = (kind: 'support' | 'load', index: number) => {
+    try {
+      if (studyHead && studyHead !== head?.revision_id) throw new Error('草稿来自旧版本，请先核对版本。');
+      previewBoundary(kind, index, JSON.parse(study));
+    } catch (failure) { setError(failure instanceof Error ? failure.message : String(failure)); }
+  };
+  const locateExtreme = (metric: 'maxDisplacement' | 'maxVonMises') => {
+    const point = result?.result?.summary?.[`${metric}Location`];
+    if (!currentEvidence || !Array.isArray(point) || point.length !== 3 || !point.every(Number.isFinite)) return;
+    setField(metric === 'maxDisplacement' ? 'displacement' : 'vonMises'); setBoundaryPreview(null);
+    const offset = result?.result?.summary?.[`${metric}Displacement`];
+    setHotspot({ point: point as number[], displacement: Array.isArray(offset) ? offset as number[] : undefined,
+      label: metric === 'maxDisplacement' ? '全模型最大位移' : '全模型节点平均应力极值', token: Date.now(), artifact: result!.result!.artifact_id });
   };
   const number = (key: string) => {
     const value = result?.result?.summary?.[key];
@@ -356,23 +483,34 @@ export default function CoreWorkspace() {
         <div hidden={workspacePage !== 'verification'} className="verification-host">{workspacePage === 'verification' && <VerificationPanel />}</div>
         <div className={`engineering-stage${workspacePage === 'simulation' ? ' simulation-stage' : ''}`} hidden={workspacePage === 'verification'}>
         {workspacePage === 'simulation' && head && <>          <section className="simulation-config" aria-label="分析工况"><header><FlaskConical size={17} /><h2>分析工况</h2></header>
-            <p>工况保存后生效。请明确材料、约束、合力及网格尺寸；新工程不自动施加载荷。</p>
+            <p className="study-intro">在右侧工程助手说明分析目的，AI 配置的参数会显示在这里。</p>
+            <SimulationReview document={{ ...head.document, study: scopeDraft }} dirty={studyDirty} boundaries={studyDirty ? [] : boundaryEvidence} disabled={busy || queryBusy || !topology}
+              preview={(kind, index) => studyDirty ? previewDraft(kind, index) : previewBoundary(kind, index)} clear={() => clearSelection()} />
+            <details className="study-manual"><summary>手动调整（高级）</summary>
+            {!study.trim() && <button className="core-primary" disabled={!geometry || busy} onClick={() => {
+              setStudy(JSON.stringify(head.document.study ?? freshStudy(), null, 2)); setStudyHead(head.revision_id); setStudyDirty(true);
+            }}>开始图形化设置</button>}
+            <p>先在模型上选安装面或受力面。新草稿材料为钢材参考值，请展开材料参数核对。</p>
+            {pendingRegion && <div className="study-pick-instruction" role="status">
+              <strong>{pendingRegion.kind === 'support' ? '请选择要固定的面' : '请选择要施力的面'}</strong>
+              <p>点击模型选面，或用对象列表多选。所选面会高亮；选择后确认应用。</p>
+              <button disabled={busy || queryBusy || !selection.length || !selection.every(id => id.includes('/face-'))} onClick={() => applyFaceSelection(pendingRegion.kind, pendingRegion.index)}>使用所选面</button>
+              <button onClick={() => { setPendingRegion(null); clearSelection(); }}>取消选面</button>
+            </div>}
             <button onClick={() => { setStudy(JSON.stringify(head.document.study ?? { material: { E: 210000, nu: .3, rho: 7850, yieldStrength: 235 },
               supports: [{ id: 'fixed', face: 'x-min' }], loads: [{ id: 'force', face: 'x-max', vector: [1, 0, 0], magnitude: 100 }], mesh_size: 4 }, null, 2)); setStudyHead(head.revision_id); setStudyDirty(!head.document.study); }}>
               {head.document.study ? '载入已保存工况' : '创建示例草稿（请核对）'}</button>
-            {geometry && topology && <details className="simulation-regions" open={regionSettingsOpen} onToggle={event => setRegionSettingsOpen(event.currentTarget.open)}><summary>分析体与约束区域{selection.length ? ` · 已选 ${selection.length} 项` : ''}</summary>
-              <p>在视口选择实体以限定分析范围，或将已命名的面区域设为固定约束。操作会保存工况；如有未保存的编辑，请先保存或重新载入。</p>
-            <button disabled={busy || studyDirty || queryBusy || !head.document.study || !selection.length || !selection.every(id => topology.bodies.some(body => body.id === id && body.kind === 'solid'))} onClick={() => void run(async () => {
-              const revision = await coreRequest<CoreRevision>(`${base}/study`, { ...coreCommand(head.revision_id),
-                study: { ...head.document.study!, body_ids: selection, body_artifact_id: geometry } });
-              if (current.current === selected) { setHead(revision); setStudy(JSON.stringify(revision.document.study, null, 2)); setStudyHead(revision.revision_id); }
-            })}>将所选实体用于分析</button>
-            <button disabled={busy || studyDirty || !head.document.study?.body_ids} onClick={() => void run(async () => {
-              const revision = await coreRequest<CoreRevision>(`${base}/study`, { ...coreCommand(head.revision_id),
-                study: { ...head.document.study!, body_ids: null, body_artifact_id: null } });
-              if (current.current === selected) { setHead(revision); setStudy(JSON.stringify(revision.document.study, null, 2)); setStudyHead(revision.revision_id); }
-            })}>使用全部闭合实体</button>
-            {head.document.study?.body_ids && <p>{head.document.study.body_artifact_id === geometry ? `分析体：${head.document.study.body_ids.join('、')}` : '分析体选择已失效，请重新选择当前实体。'}</p>}
+            {geometry && topology && <section className="study-scope" aria-label="分析范围">
+              <h3>⓪ 分析哪些实体？</h3>
+              <p role="status">{studyDirty ? '草稿分析范围' : '当前分析范围'}：{study.trim() && !scopeDraft ? '草稿格式无效，请先修正' : scopeDraft?.body_ids ? scopeDraft.body_ids.map(id => topology.bodies.find(body => body.id === id)?.name ?? id).join('、') : '全部闭合实体'}
+                {scopeDraft?.body_ids && scopeDraft.body_artifact_id !== geometry ? ' · 已失效，请重新选择' : ''}</p>
+              <p>在三维视口切换“选择实体”，选中要计算的零件，再点击下方按钮。范围先加入草稿，可稍后设置约束和载荷。</p>
+              <button disabled={busy || queryBusy || !selection.length || !selection.every(id => topology.bodies.some(body => body.id === id && body.kind === 'solid'))} onClick={() => setAnalysisScope(selection)}>将所选实体用于分析</button>
+              <button disabled={busy || queryBusy || !scopeDraft?.body_ids} onClick={() => setAnalysisScope(null)}>使用全部闭合实体</button>
+              {studyDirty && <p>尚未保存；保存工况后才生效。请一并核对已有约束与施力是否属于该范围。</p>}
+            </section>}
+            {geometry && topology && <details className="simulation-regions" open={regionSettingsOpen} onToggle={event => setRegionSettingsOpen(event.currentTarget.open)}><summary>高级命名区域与约束</summary>
+              <p>以下命名区域操作使用已保存工况；图形化设置请使用下方卡片。</p>
               {(head.document.objects ?? []).map(object => {
                 const bound = object.binding.artifact_id === geometry;
                 const faces = object.binding.topology_ids.every(id => id.includes('/face-'));
@@ -386,7 +524,7 @@ export default function CoreWorkspace() {
                 </div>;
               })}
             </details>}
-            <StudyForm text={study} document={head.document} change={text => { setStudy(text); setStudyDirty(true); setStudyHead(previous => previous ?? head.revision_id); }} />
+            <StudyForm text={study} document={head.document} pick={beginFacePick} preview={previewDraft} disabled={busy || queryBusy || !geometry} change={text => { setStudy(text); setStudyDirty(true); setStudyHead(previous => previous ?? head.revision_id); }} />
             <details><summary>高级工况 JSON</summary><label>工况 JSON<textarea aria-label="工况 JSON" rows={12} value={study} onChange={event => { setStudy(event.target.value); setStudyDirty(true); setStudyHead(previous => previous ?? head.revision_id); }} spellCheck={false} /></label></details>
             <DraftVersion base={studyHead} current={head.revision_id} rebase={() => setStudyHead(head.revision_id)} />
             <button disabled={busy || !study.trim()} onClick={() => void run(async () => {
@@ -399,6 +537,8 @@ export default function CoreWorkspace() {
           })}>运行静力分析</button>
           {studyDirty && <p className="study-warning">请先保存并核对工况，再运行分析。</p>}
           <p>当前：各向同性线弹性、小变形、固定约束与总合力。弯曲问题请做网格细化检查。</p>
+            </details>
+          {markerError && <p role="status">{markerError}</p>}
           <button onClick={() => setBottomTab('results')}>查看数值证据</button>
           <details ref={requirementPanel}><summary>验收指标与要求</summary>
             <label>要求说明<textarea aria-label="要求说明" rows={3} value={statement} onChange={event => { setStatement(event.target.value); setRequirementHead(previous => previous ?? head.revision_id); }} /></label>
@@ -436,8 +576,10 @@ export default function CoreWorkspace() {
           <p>按 Ctrl / Cmd 多选；列表与视口使用同一份选择。</p>
           {(head?.document.objects ?? []).map(object => <button key={object.id} disabled={queryBusy || object.binding.artifact_id !== geometry} onClick={() => void inspectSelection(object.binding.topology_ids)}>{object.name}{object.binding.artifact_id !== geometry ? ' · 需重新绑定' : ''}</button>)}
         </section>}
-        <CoreViewport theme={theme} artifact={geometry} result={displayResult} clearToken={pickReset} onClear={() => clearSelection()} picking={!displayResult && pickMode !== 'view' && !queryBusy && !busy} visual={!displayResult && inspection?.artifact_id === geometry ? inspection.visual : null}
+        <CoreViewport boundaries={workspacePage === 'simulation' && showStudyMarkers ? automaticMarkers : []} boundary={workspacePage === 'simulation' && visibleBoundary?.revision === head?.revision_id ? visibleBoundary : null}
+          hotspot={displayResult && hotspot?.artifact === displayResult.artifact ? hotspot : null} theme={theme} artifact={geometry} result={displayResult} clearToken={pickReset} onClear={() => { setBoundaryPreview(null); setHotspot(null); setPendingRegion(null); clearSelection(); }} picking={!displayResult && pickMode !== 'view' && !queryBusy && !busy} visual={!displayResult && inspection?.artifact_id === geometry ? inspection.visual : null}
           toolbar={<>
+            {workspacePage === 'simulation' && head?.document.study && <button aria-pressed={showStudyMarkers} title="显示已保存工况的载荷与固定位置" onClick={() => { if (!showStudyMarkers) setMarkerRefresh(value => value + 1); setShowStudyMarkers(value => !value); }}>工况标记{showStudyMarkers ? ' ✓' : ''}</button>}
             {currentEvidence ? <select aria-label="结果显示" title="模型与结果显示" value={displayResult ? field : 'geometry'} onChange={event => { setField(event.target.value as typeof field); setObjectListOpen(false); setPickMode(event.target.value === 'geometry' ? 'face' : 'view'); clearSelection(); }}>
               <option value="geometry">三维模型</option><option value="displacement">位移云图</option><option value="vonMises">应力云图</option>
             </select> : <span className="viewport-mode-label">模型</span>}
@@ -456,6 +598,19 @@ export default function CoreWorkspace() {
             {!displayResult && inspection?.is_pick && inspection.candidate_count > 1 && inspection.candidates.map(item => <button key={item.id} disabled={queryBusy} onClick={() => void inspectSelection([item.id])}>{objectLabel(item.id)} · 距离 {item.distance_mm.toPrecision(3)} mm</button>)}
             {!displayResult && inspection?.is_pick && inspection.candidate_count > 16 && <small>仅显示前 16 个候选，请使用对象列表查看其余对象。</small>}
             {!displayResult && selection.length > 0 && <button onClick={() => { setChatOpen(true); setReferenceRequest(value => value + 1); }}>引用到右侧对话</button>}
+            {!displayResult && workspacePage === 'simulation' && selection.length > 0 && !selection.every(id => id.includes('/face-')) && <div className="selection-engineering-actions">
+              <p>当前选中的是实体或边，不是受力面。选择对象不会更改原来的约束或载荷。</p>
+              {head && topology && selection.every(id => topology.bodies.some(body => body.id === id && body.kind === 'solid')) && <button disabled={busy || queryBusy} onClick={() => setAnalysisScope(selection)}>仅分析所选实体</button>}
+              <button disabled={queryBusy} onClick={() => { setPickMode('face'); setBoundaryPreview(null); clearSelection('请点击支撑柱上实际受力或固定的表面。'); }}>切换到选面</button>
+            </div>}
+            {!displayResult && head && geometry && selection.length > 0 && selection.every(id => id.includes('/face-')) && <div className="selection-engineering-actions">
+              <strong>用这些面设置工况</strong>
+              {pendingRegion ? <button disabled={busy || queryBusy} onClick={() => applyFaceSelection(pendingRegion.kind, pendingRegion.index)}>{pendingRegion.kind === 'support' ? '固定这些面' : '在这些面施力'}</button> : <>
+                <button disabled={busy || queryBusy} onClick={() => applyFaceSelection('support')}>固定所选面</button>
+                <button disabled={busy || queryBusy} onClick={() => applyFaceSelection('load')}>在所选面施力</button>
+              </>}
+              <small>加入草稿，保存工况后生效。</small>
+            </div>}
             {!displayResult && head && geometry && topology && selection.length > 0 && <details className="selection-actions"><summary>命名与区域绑定</summary>
             <label>对象名称<input value={objectName} onChange={event => setObjectName(event.target.value)} /></label>
             <label>用途说明<textarea aria-label="用途说明" rows={3} value={purpose} onChange={event => setPurpose(event.target.value)} /></label>
@@ -515,10 +670,24 @@ export default function CoreWorkspace() {
           {latestAnalysis && activeJob(latestAnalysis) && <p>本轮计算中，当前显示此前的结果。</p>}
           {latestAnalysis && ['failed', 'timed_out', 'interrupted', 'cancelled'].includes(latestAnalysis.state) && <p>最近一次计算未完成，以下结果不代表本轮成功。</p>}
           <p>输入版本 {result.revision.slice(0, 12)} · 当前仅支持各向同性线弹性静力分析。</p>
-          <dl><div><dt>最大位移 / mm</dt><dd>{number('maxDisplacement')}</dd></div>
-            <div><dt>von Mises / MPa</dt><dd>{number('maxVonMises')}</dd></div>
+          <div className="simulation-status" aria-label="分析可信度状态">
+            <span>方程求解：{currentEvidence ? '数值核验通过' : '当前输入未核验'}</span>
+            <span>当前零件网格精度：未检查</span>
+            <span>设计指标：{requirementStatus(validAssessment)}</span>
+          </div>
+          <p>以下极值覆盖全模型节点；应力为节点平均恢复值。云图色标只覆盖 FEM 边界节点，两者可能不同。</p>
+          <dl><div><dt>全模型最大位移 / mm</dt><dd>{number('maxDisplacement')}</dd>
+            <button disabled={!currentEvidence || !Array.isArray(result.result?.summary?.maxDisplacementLocation)} onClick={() => locateExtreme('maxDisplacement')}>定位最大位移</button></div>
+            <div><dt>全模型节点平均 von Mises / MPa</dt><dd>{number('maxVonMises')}</dd>
+              <button disabled={!currentEvidence || !Array.isArray(result.result?.summary?.maxVonMisesLocation)} onClick={() => locateExtreme('maxVonMises')}>定位应力极值</button></div>
+            <div><dt>屈服安全系数（节点平均应力口径）</dt><dd>{number('safetyFactor')}</dd></div>
+            <div><dt>网格质量 / kg</dt><dd>{number('mass_kg')}</dd></div>
             <div><dt>相对残差</dt><dd>{number('relativeResidual')}</dd></div>
             <div><dt>反力平衡误差</dt><dd>{number('equilibriumError')}</dd></div></dl>
+          <details><summary>网格与求解详情</summary><p>单元 {number('elements')} · 节点 {number('nodes')} · 自由度 {number('dofs')}<br />
+            算法 {String(result.result?.summary?.solverAlgorithm ?? '未记录')} · 预条件 {String(result.result?.summary?.preconditioner ?? '未记录')}<br />
+            网格 {number('meshMs')} ms · 装配与线性求解 {number('solveMs')} ms（不含应力恢复及发布）</p></details>
+          <p>低残差不代表网格精度或局部应力收敛；解析校核页的基准测试不代替当前零件检查。</p>
           <p>{head?.document.requirements?.length ? '数值证据与已定义指标的校核分别显示。' : '计算完成不等同于设计要求已满足。请按工程需要定义校核指标。'}</p>
           {result.result && <a href={coreArtifactUrl(result.result.artifact_id, 'field.npz')}>下载完整结果场</a>}
         </section>}
@@ -561,7 +730,7 @@ export default function CoreWorkspace() {
       </section>
       </div>
       </section>
-      {head && <ConversationPanel key={selected} project={selected} revision={head.revision_id} artifact={geometry} selection={selection} referenceRequest={referenceRequest} onMemory={openMemory} onModel={() => setSettingsPage('model')} settingsVersion={settingsVersion} />}
+      {head && <ConversationPanel analysisMode={workspacePage === 'simulation'} analysisDraft={scopeDraft} onStudyConfigured={revision => { if (head.revision_id === revision) { setStudyDirty(false); setStudyHead(revision); } }} key={selected} project={selected} revision={head.revision_id} artifact={geometry} selection={selection} referenceRequest={referenceRequest} onMemory={openMemory} onModel={() => setSettingsPage('model')} settingsVersion={settingsVersion} />}
     </div>
   </main>;
 }

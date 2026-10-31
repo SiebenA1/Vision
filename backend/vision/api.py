@@ -111,6 +111,7 @@ def create_app(root, *, run_jobs=True, cad_timeout=240, fea_timeout=600):
         from .provider import status
         model = status(workspace.root)
         return {"schema": "vision.workspace/4", "api": "v2", "controller": bool(controller.thread and controller.thread.is_alive()),
+                "features": ["conversation-analysis-draft/1", "analysis-context/1", "analysis-reuse/1", "analysis-setup-once/1"],
                 "task_mode": "explicit-local-plan/1", "external_model_enabled": model["configured"], "model": model,
                 "physics": ["isotropic-linear-static"], "experimental": True,
                 "worker_memory_limit_mib": memory_budget(), "query_memory_limit_mib": 1024 if os.name == "nt" else None}

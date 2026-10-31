@@ -4,17 +4,15 @@ AI-native CAD / CAE engineering studio. Natural-language intent becomes editable
 
 ## Start
 
-Node.js ≥ 20.19 and Python are required. On Windows, install project-local native runtimes once:
+On Windows x64, install Node.js ≥ 20.19 and Python 3, then run the standalone launcher from the repository:
 
 ```powershell
-npm install
-python scripts/setup_native.py --fea
-npm run dev
+powershell -ExecutionPolicy Bypass -File scripts/start-local.ps1
 ```
 
-The setup installs USD BRep 1.0.0 in CPython 3.12 and TetGen / scikit-fem / SciPy in CPython 3.13 without changing system Python. `npm run dev` automatically checks and starts the local backend on loopback port 8111 before serving the UI on port 4173. An already-running healthy backend is reused; stopping Vite stops only a backend it started. The frontend fails if its port is occupied instead of silently switching ports. `npm run backend` remains available for independent backend operation.
+The launcher checks and reuses existing frontend, v2 and native dependencies, including installations made before this launcher existed. Missing dependencies are installed; USD BRep 1.0.0 uses project-local CPython 3.12 and TetGen / scikit-fem / SciPy use CPython 3.13. A successful existing-environment check records configuration hashes without reinstalling. Later launches install only if dependencies are missing, the recorded dependency configuration changes, or `-Reinstall` is supplied. Installation requires network access. It creates `.env` from `.env.example` only if absent and never replaces an existing `.env`. Use `-SetupOnly` to configure without starting, `-CheckOnly` to verify without installing or starting, or `-Reinstall` to rerun dependency setup. Optional local semantic-memory models are configured separately with `scripts/setup_memory.py`.
 
-Set `VISION_ENGINEERING_PORT` to use another managed local port. Set `VISION_ENGINEERING_URL` in the environment or `.env` to connect to an independently managed backend; this disables automatic startup. An unreachable backend returns a diagnostic JSON 503; the Agent stops the turn instead of repeatedly submitting CAD calls. Configure DeepSeek in the UI or with `DEEPSEEK_API_KEY` for conversational modeling. Manual USD import, script editing, and analysis do not require an AI key.
+`npm run dev` automatically starts or reuses the v2 core on loopback port 8112, then serves the UI on port 4173. Stopping Vite stops only a core it started. `npm run preview` uses the same lifecycle. Set `VISION_CORE_PORT` for another managed port or `VISION_CORE_WORKSPACE` for another data directory (default `.vision-workspace`). Set `VISION_CORE_URL` in the environment or `.env` for an independently managed core; this disables automatic startup. An unreachable core returns a diagnostic JSON 503. `npm run core` remains available for independent v2 operation. The unused legacy engineering, DeepSeek and model-status proxies have been removed; `npm run backend` is retained only for direct legacy API debugging. Set `DEEPSEEK_API_KEY` for AI conversation; manual modeling and analysis do not require it.
 
 ## Native modeling and analysis
 
@@ -37,6 +35,8 @@ See [the integration contract](docs/usd-brep-integration.md) for API coverage, s
 
 See [the current core code map](docs/core-code-map.md) for the active workspace entry, backend responsibilities and legacy-code cleanup boundaries.
 
+See [the current Mermaid architecture atlas](docs/architecture-current.md) for the implemented v2 architecture, Agent–LLM interaction, context and engineering data flows, task/turn/job state machines, and persistence relationships.
+
 The [development plan](docs/development-plan.md) defines the roadmap. The
 [development status](docs/development-status.md) distinguishes implemented v2
 features from remaining acceptance work.
@@ -47,12 +47,10 @@ The current application uses the durable engineering core and a single desktop-s
 
 ```powershell
 .python313/python.exe -m pip --disable-pip-version-check install -r backend/requirements.txt
-npm run core
-# In a second terminal:
 npm run dev
 ```
 
-Open `http://127.0.0.1:4173/`. This workspace persists project
+Vite automatically starts or reuses the v2 core; no second terminal is required. Open `http://127.0.0.1:4173/`. This workspace persists project
 revisions, native CAD/FEA jobs and artifacts in `.vision-workspace`. It includes
 explicit study settings, requirements with source records, numerical assessment,
 reports, semantic object bindings, version restoration and full project bundles.

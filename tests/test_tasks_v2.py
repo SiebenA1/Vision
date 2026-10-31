@@ -73,12 +73,20 @@ class TaskProtocolTest(unittest.TestCase):
         self.assertEqual(corrected.status_code, 200, corrected.text)
         self.assertEqual(self.client.post(f"/api/v2/tasks/{task}/correct", json=request).json(), corrected.json())
         self.assertEqual(self.advance(task)["state"], "completed")
+
         self.assertEqual(self.tasks.get(task)["epoch"], 2)
         self.assertEqual(self.client.post(f"/api/v2/tasks/{task}/cancel", json=command("old", expected_epoch=1)).status_code, 409)
         context = self.client.get(f"/api/v2/tasks/{task}/context").json()
         self.assertFalse(context["external_transmission"])
         self.assertEqual(context["context"]["epoch"], 2)
         self.assertLessEqual(context["metadata"]["characters"], context["metadata"]["budget_characters"])
+
+    def test_repeated_study_configuration_is_a_noop(self):
+        task = self.create([step('configure_study', study=STUDY), step('configure_study', study=STUDY)])
+        result = self.advance(task)
+        self.assertEqual(result['state'], 'completed', result)
+        self.assertEqual(len(self.workspace.history(self.project)), 2)
+        self.assertTrue(result['steps'][1]['receipt']['unchanged'])
 
     def test_correction_between_checkpoint_and_write_is_fenced(self):
         task = self.create([step("build_geometry", script="result=u.create_box((0,0,0),1,1,1)")])

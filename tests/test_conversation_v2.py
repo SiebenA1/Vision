@@ -59,6 +59,46 @@ class ConversationTest(unittest.TestCase):
         self.assertEqual(self.client.post(self.path, json=request).json(), second)
         self.assertEqual(len(self.client.get(self.path).json()['messages']), 4)
 
+    def test_static_planner_reads_geometry_then_configures_and_submits_one_solve(self):
+        workspace = self.app.state.workspace
+        folder = Path(self.folder.name) / 'analysis-fixture'
+        folder.mkdir()
+        (folder / 'source.py').write_text('# offline artifact fixture, not verified CAD', encoding='utf-8')
+        manifest = workspace.artifacts.publish(folder, ['source.py'], {'kind': 'cad', 'bodies': [
+            {'id': 'body-0', 'name': 'beam', 'kind': 'solid', 'faces': [
+                {'id': 'body-0/face-0', 'area_mm2': 200}, {'id': 'body-0/face-1', 'area_mm2': 200}], 'edges': []}]})
+        self.project = workspace.edit(self.project['project_id'], command('fixture', expected_head=self.project['revision_id']),
+                                      lambda db, document: {**document, 'geometry': manifest['artifactId']})
+        request, _ = self.send('analysis', '允许按钢材示例，固定左端、右端横向100N，配置并计算。',
+                               artifact_id=manifest['artifactId'], selection=['body-0'],
+                               analysis_draft={'material': {'E': 210000, 'nu': .3, 'rho': 7850, 'yieldStrength': 235},
+                                               'supports': [], 'loads': [], 'mesh_size': 4,
+                                               'body_ids': ['body-0'], 'body_artifact_id': manifest['artifactId']})
+        study = {'material': {'E': 210000, 'nu': .3, 'rho': 7850, 'yieldStrength': 235},
+                 'supports': [{'id': 'fixed', 'region': {'type': 'cad-face', 'artifactId': manifest['artifactId'], 'faceIds': ['body-0/face-0'], 'toleranceMm': .1}}],
+                 'loads': [{'id': 'load', 'vector': [0, 0, -1], 'magnitude': 100, 'region': {'type': 'cad-face', 'artifactId': manifest['artifactId'], 'faceIds': ['body-0/face-1'], 'toleranceMm': .1}}],
+                 'mesh_size': 4, 'body_ids': ['body-0'], 'body_artifact_id': manifest['artifactId']}
+        task = request['task_id']
+        self.app.state.tasks.step(task)
+        with patch('backend.vision.provider.complete', side_effect=[
+                response('analysis_context', {'body_ids': ['body-0']}, 'analysis-context'),
+                response('configure_study', {'study': study}, 'analysis-config'),
+                response('solve', {}, 'analysis-solve')]):
+            for _ in range(3):
+                self.app.state.tasks.step(task)
+        result = self.app.state.tasks.get(task)
+        self.assertEqual(result['state'], 'waiting_job', result)
+        self.assertEqual(result['jobs'], 1)
+        receipt = result['steps'][0]['receipt']
+        self.assertEqual(receipt['scope']['body_ids'], ['body-0'])
+        self.assertEqual(receipt['candidate_study']['supports'], [])
+        self.assertEqual(receipt['faces'][1]['id'], 'body-0/face-1')
+        configured = workspace.revision(self.project['project_id'])['document']['study']
+        self.assertEqual(configured['body_ids'], ['body-0'])
+        self.assertEqual(configured['loads'][0]['magnitude'], 100)
+        visible = self.client.get(self.path).json()['messages'][0]['text']
+        self.assertEqual(visible, '允许按钢材示例，固定左端、右端横向100N，配置并计算。')
+
     def test_late_response_after_new_message_is_discarded(self):
         first, _ = self.send('first', '旧目标')
         self.app.state.tasks.step(first['task_id'])

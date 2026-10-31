@@ -11,13 +11,42 @@ PYTHON = ROOT / '.python312/python.exe'
 
 @unittest.skipUnless(PYTHON.is_file(), 'requires project-local native CAD runtime')
 class NativeParametersTest(unittest.TestCase):
+    def test_consumed_template_is_reported_before_native_copy_or_method(self):
+        for copy_expression in ('u.brep_copy(template)', 'template.copy()'):
+            script = ('body=u.create_box((0,0,0),10,10,10)\n'
+                      'template=u.create_box((9,0,0),3,3,3)\n'
+                      'for i in range(2):\n'
+                      f' fin={copy_expression} if i else template\n'
+                      ' body=u.boolean_union(body,fin)\nresult=body')
+            with self.subTest(copy=copy_expression), tempfile.TemporaryDirectory(dir=ROOT / 'tests') as folder:
+                root = Path(folder)
+                request, response = root / 'request.json', root / 'response.json'
+                request.write_text(json.dumps({'script': script}), encoding='utf-8')
+                process = subprocess.run([str(PYTHON), '-I', '-X', 'utf8', str(ROOT / 'server/usd_brep_worker.py'),
+                                          str(request), str(response)], capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=60)
+                self.assertTrue(response.exists(), process.stderr)
+                error = json.loads(response.read_text(encoding='utf-8'))
+                self.assertEqual(error['error_kind'], 'cad_script')
+                self.assertIn('已消耗', error['error'])
+                self.assertNotEqual(process.returncode & 0xffffffff, 0xc0000005)
+
+    def test_template_copied_on_every_iteration_preserves_python_call_frames(self):
+        result = self.build('body=u.create_box((0,0,0),10,10,10)\n'
+                            'template=u.create_box((9,0,0),3,3,3)\n'
+                            'assert "template" in locals()\n'
+                            'for i in range(2):\n'
+                            ' fin=u.brep_copy(template)\n'
+                            ' u.translate(fin,(0,4*i,0))\n'
+                            ' body=u.boolean_union(body,fin)\nresult=body', {})
+        self.assertAlmostEqual(result['metrics']['volume_mm3'], 1036, places=3)
+
     def build(self, script, parameters):
         with tempfile.TemporaryDirectory(dir=ROOT / 'tests') as folder:
             folder = Path(folder)
             request, response = folder / 'request.json', folder / 'response.json'
             request.write_text(json.dumps({'script': script, 'options': {'parameters': parameters}}), encoding='utf-8')
             process = subprocess.run([str(PYTHON), '-I', '-X', 'utf8', str(ROOT / 'server/usd_brep_worker.py'),
-                                      str(request), str(response)], capture_output=True, text=True, encoding='utf-8', timeout=60)
+                                      str(request), str(response)], capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=60)
             self.assertTrue(response.exists(), process.stderr)
             result = json.loads(response.read_text(encoding='utf-8'))
             self.assertNotIn('error', result, result.get('trace', result.get('error')))

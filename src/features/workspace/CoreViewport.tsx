@@ -5,15 +5,23 @@ import { parseBinaryStl } from '../../core/cad/stl';
 import { coreArtifactUrl, type CoreInspection } from './api';
 import { parseSurface, surfaceColors, type ResultField } from './fields';
 import { viewRuler } from './viewHelpers';
+import { boundaryAnchor, type BoundaryPreview } from './simulationHelpers';
 import { Box, Maximize2, SlidersHorizontal } from 'lucide-react';
 
 /** Mesh hits locate queries; only the native kernel resolves topology identity. */
-export function CoreViewport({ artifact, picking, onPick, onMiss, onClear, clearToken, visual, result, selectionOverlay, toolbar, theme = 'light' }: { artifact: string | null; picking: boolean; theme?: 'light' | 'dark';
+export function CoreViewport({ artifact, picking, onPick, onMiss, onClear, clearToken, visual, result, selectionOverlay, toolbar, boundary, boundaries, hotspot, theme = 'light' }: { artifact: string | null; picking: boolean; theme?: 'light' | 'dark';
+  boundary?: BoundaryPreview | null;
+  boundaries?: BoundaryPreview[];
+  hotspot?: { point: number[]; displacement?: number[]; label: string; token: number } | null;
   result?: { artifact: string; field: ResultField; scale: number } | null;
   onPick: (point: number[], pixelMm: number) => void; onMiss?: () => void;
   onClear?: () => void; clearToken?: number;
   selectionOverlay?: ReactNode; toolbar?: ReactNode; visual: CoreInspection['visual'] | null }) {
   const host = useRef<HTMLDivElement>(null);
+  const engineeringStyle = useRef({ boundary, boundaries, hotspot, visual, result }); engineeringStyle.current = { boundary, boundaries, hotspot, visual, result };
+  const updateEngineering = useRef<() => void>(() => {});
+  const [engineeringNote, setEngineeringNote] = useState('');
+  const [markerCount, setMarkerCount] = useState(0);
   const viewOptions = useRef<HTMLDetailsElement>(null);
   const interaction = useRef({ picking, onPick, onMiss }); interaction.current = { picking, onPick, onMiss };
   const viewAction = useRef<(preset: string) => void>(() => {});
@@ -105,6 +113,102 @@ export function CoreViewport({ artifact, picking, onPick, onMiss, onClear, clear
       camera.near = diagonal / 10000; camera.far = diagonal * 1000;
       const controls = new OrbitControls(camera, renderer.domElement);
       controls.target.copy(center); controls.enableDamping = true; controls.update();
+      const engineering = new THREE.Group(); scene.add(engineering);
+      const clearEngineering = () => {
+        engineering.traverse(object => {
+          const item = object as THREE.Mesh;
+          item.geometry?.dispose();
+          if (item.material) (Array.isArray(item.material) ? item.material : [item.material]).forEach(material => material.dispose());
+        });
+        engineering.clear();
+      };
+      let lastFocus = 0;
+      updateEngineering.current = () => {
+        clearEngineering(); setEngineeringNote(''); setMarkerCount(0);
+        const { boundary: manual, boundaries: automatic, hotspot: focus, visual: outline, result: style } = engineeringStyle.current;
+        const line = (points: THREE.Vector3[], color: string) => {
+          const object = new THREE.Line(new THREE.BufferGeometry().setFromPoints(points), new THREE.LineBasicMaterial({ color, depthTest: false }));
+          object.renderOrder = 30; engineering.add(object);
+        };
+        if (focus && style) {
+          const position = new THREE.Vector3(...focus.point as [number, number, number]);
+          if (focus.displacement) position.addScaledVector(new THREE.Vector3(...focus.displacement as [number, number, number]), style.scale);
+          else if (style.scale !== 0) { setEngineeringNote('此历史结果未记录热点位移，请将变形倍率设为 0 后定位。'); return; }
+          const marker = new THREE.Mesh(new THREE.SphereGeometry(diagonal * .012, 16, 12), new THREE.MeshBasicMaterial({ color: '#ffcf62', depthTest: false }));
+          marker.position.copy(position); marker.renderOrder = 40; engineering.add(marker);
+          if (lastFocus !== focus.token) {
+            camera.position.add(position.clone().sub(controls.target)); controls.target.copy(position); controls.update(); lastFocus = focus.token;
+          }
+          setEngineeringNote(`${focus.label} · 原始坐标 [${focus.point.map(x => Number(x.toPrecision(6))).join(', ')}] mm；内部极值可能位于表面之后。`);
+          return;
+        }
+        const notes: string[] = [];
+        let glyphs = 0;
+        for (const value of manual ? [manual] : automatic ?? []) {
+        const color = value.kind === 'load' ? '#e34646' : '#2998df';
+        let anchor: THREE.Vector3 | null = null;
+        if (value.evidence?.center) {
+          const samples = value.evidence.displayNodes ?? [];
+          const selectedPoint = boundaryAnchor(samples, value.evidence.center);
+          if (selectedPoint) anchor = new THREE.Vector3(...selectedPoint as [number, number, number]);
+          const dots = new THREE.Points(new THREE.BufferGeometry().setFromPoints(samples.map(point => new THREE.Vector3(...point as [number, number, number]))),
+            new THREE.PointsMaterial({ color, size: 5, sizeAttenuation: false, depthTest: false }));
+          dots.renderOrder = 30; engineering.add(dots);
+        } else if (value.region?.type === 'cad-face' || value.region?.type === 'semantic-object') {
+          const points = value.lines?.flat() ?? (manual ? outline?.lines.flat() ?? [] : []);
+          const selectedPoint = boundaryAnchor(points);
+          if (selectedPoint) anchor = new THREE.Vector3(...selectedPoint as [number, number, number]);
+        } else {
+          const bounds = value.bounds ? new THREE.Box3(new THREE.Vector3(...value.bounds.min as [number, number, number]), new THREE.Vector3(...value.bounds.max as [number, number, number])) : geometry.boundingBox!;
+          let lo = bounds.min.clone(), hi = bounds.max.clone();
+          if (value.region?.type === 'box') {
+            lo = new THREE.Vector3(...value.region.min); hi = new THREE.Vector3(...value.region.max);
+          }
+          if (value.region?.type === 'sphere') {
+            anchor = new THREE.Vector3(...value.region.center);
+            for (let axis = 0; axis < 3; axis++) {
+              const points = Array.from({ length: 65 }, (_, i) => {
+                const point = anchor!.clone(), angle = i / 64 * Math.PI * 2;
+                point.setComponent((axis + 1) % 3, point.getComponent((axis + 1) % 3) + Math.cos(angle) * (value.region as { radius: number }).radius);
+                point.setComponent((axis + 2) % 3, point.getComponent((axis + 2) % 3) + Math.sin(angle) * (value.region as { radius: number }).radius); return point;
+              }); line(points, color);
+            }
+          } else {
+            if (!value.region) {
+              const axis = ['x','y','z'].indexOf((value.face ?? 'x-min')[0]);
+              const limit = (value.face?.endsWith('max') ? hi : lo).getComponent(axis);
+              lo.setComponent(axis, limit); hi.setComponent(axis, limit);
+            }
+            anchor = lo.clone().add(hi).multiplyScalar(.5);
+            const box = new THREE.Box3Helper(new THREE.Box3(lo, hi), new THREE.Color(color)); engineering.add(box);
+          }
+          // A selector envelope is not evidence of a physical surface attachment.
+          anchor = null;
+        }
+        if (anchor) {
+          if (value.kind === 'load' && value.force && Math.hypot(...value.force) > 0) {
+            glyphs++;
+            const direction = new THREE.Vector3(...value.force as [number, number, number]).normalize();
+            const arrow = new THREE.ArrowHelper(direction, anchor, diagonal * .16, color, diagonal * .035, diagonal * .02);
+            arrow.traverse(object => {
+              object.renderOrder = 30;
+              const drawable = object as THREE.Mesh;
+              if (drawable.material) (Array.isArray(drawable.material) ? drawable.material : [drawable.material]).forEach(material => { material.depthTest = false; });
+            });
+            engineering.add(arrow);
+          } else if (value.kind === 'support') {
+            glyphs++;
+            const size = diagonal * .025;
+            line([anchor.clone().add(new THREE.Vector3(-size,0,-size)), anchor.clone().add(new THREE.Vector3(size,0,size))], color);
+            line([anchor.clone().add(new THREE.Vector3(size,0,-size)), anchor.clone().add(new THREE.Vector3(-size,0,size))], color);
+          }
+        }
+        notes.push(`${value.name} · ${value.kind === 'load' ? `合力 [${value.force?.map(x => Number(x.toPrecision(5))).join(', ')}] N` : '三个平移方向全固定'} · ${value.evidence ? '实际命中节点抽样标记（最多 192 个）' : anchor ? '求解前区域示意，箭长仅示方向，非 FEM 命中证明' : '仅选区范围示意，实际作用位置尚未确认；请选择模型面或求解后核对'}`);
+        }
+        setMarkerCount(glyphs);
+        setEngineeringNote(notes.slice(0, 3).join('；') + (notes.length > 3 ? `；另有 ${notes.length - 3} 条` : '') + (style && style.scale !== 0 && notes.length ? ' · 载荷标记按原形位置显示' : ''));
+      };
+      updateEngineering.current();
       const worldGrid = new THREE.Group();
       const gridStep = 10 ** Math.floor(Math.log10(diagonal / 10));
       const floor = new THREE.GridHelper(gridStep * 40, 40, '#8691a0', '#a3afbf');
@@ -140,7 +244,7 @@ export function CoreViewport({ artifact, picking, onPick, onMiss, onClear, clear
       refreshHud.current = updateHud;
       viewAction.current = preset => {
         const halfFov = THREE.MathUtils.degToRad(camera.fov / 2);
-        const distance = diagonal / 2 / Math.sin(Math.min(halfFov, Math.atan(Math.tan(halfFov) * camera.aspect))) * 1.12;
+        const distance = diagonal / 2 / Math.sin(Math.min(halfFov, Math.atan(Math.tan(halfFov) * camera.aspect))) * 1.35;
         const direction = preset === 'front' ? new THREE.Vector3(0, -1, 0) : preset === 'right' ? new THREE.Vector3(1, 0, 0) :
           preset === 'top' ? new THREE.Vector3(0, -.0001, 1) : preset === 'iso' ? new THREE.Vector3(1, -1.3, .85) : camera.position.clone().sub(controls.target);
         controls.target.copy(center); camera.position.copy(center).add(direction.normalize().multiplyScalar(distance));
@@ -149,7 +253,11 @@ export function CoreViewport({ artifact, picking, onPick, onMiss, onClear, clear
       controls.addEventListener('change', updateHud);
       let fitted = false;
       const resize = new ResizeObserver(() => {
+        const tangent = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+        const previousSpan = tangent * Math.min(1, camera.aspect);
         camera.aspect = Math.max(1, container.clientWidth) / Math.max(1, container.clientHeight);
+        // Preserve the target and orientation when panels change the viewport width.
+        if (fitted) camera.position.sub(controls.target).multiplyScalar(previousSpan / (tangent * Math.min(1, camera.aspect))).add(controls.target);
         camera.updateProjectionMatrix();
         renderer.setSize(Math.max(1, container.clientWidth), Math.max(1, container.clientHeight));
         updateHud();
@@ -212,6 +320,7 @@ export function CoreViewport({ artifact, picking, onPick, onMiss, onClear, clear
         controls.removeEventListener('change', updateHud);
         updateField.current = () => {};
         cancelAnimationFrame(frame); resize.disconnect(); controls.dispose();
+        updateEngineering.current = () => {}; clearEngineering();
         geometry.dispose(); material.dispose(); edgeGeometry.dispose(); edgeMaterial.dispose();
         floor.geometry.dispose(); floor.material.dispose(); worldAxes.geometry.dispose(); (worldAxes.material as THREE.Material).dispose();
         markerGeometry.dispose(); markerMaterial.dispose();
@@ -224,6 +333,7 @@ export function CoreViewport({ artifact, picking, onPick, onMiss, onClear, clear
     return () => { abort.abort(); release(); };
   }, [artifact, result?.artifact]);
   useEffect(() => { updateField.current(); }, [result?.field, result?.scale]);
+  useEffect(() => { updateEngineering.current(); }, [boundary, boundaries, hotspot, visual, result?.scale, result?.artifact]);
   useEffect(() => { sceneStyle.current(); }, [theme]);
   useEffect(() => { highlight.current(visual); }, [visual]);
   useEffect(() => { if (gridObject.current) gridObject.current.visible = gridVisible; }, [gridVisible]);
@@ -279,10 +389,11 @@ export function CoreViewport({ artifact, picking, onPick, onMiss, onClear, clear
         {hitPoint && <small>点击点（显示网格） · X {hitPoint[0].toFixed(3)} / Y {hitPoint[1].toFixed(3)} / Z {hitPoint[2].toFixed(3)} mm</small>}
       </div>}
     </>}
+    {(boundary || boundaries?.length || hotspot) && engineeringNote && <div className="simulation-viewport-note" data-marker-count={markerCount} role="status">{engineeringNote}</div>}
     {result && range && <div className="core-field-legend" aria-label="结果场图例">
       <strong>{range.field === 'displacement' ? '位移幅值 / mm' : '节点平均 von Mises / MPa'}</strong>
       <div className="core-color-ramp" /><span>{range.min.toPrecision(5)} — {range.max.toPrecision(5)}</span>
-      <span>变形倍率 ×{result.scale} · FEM 边界节点范围</span>
+      <span>变形倍率 ×{result.scale} · 仅 FEM 边界节点范围（非全模型极值）</span>
     </div>}
   </div>;
 }

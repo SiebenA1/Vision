@@ -66,6 +66,36 @@ class ContextEfficiencyTest(unittest.TestCase):
                  'arguments':{'script':'result = u.create_box((0,0,0),1,2,3)\n# comment '+str(i)}})) for i in range(3)]
         self.assertIn('preview_build', planning_progress(self.task, turns)['blocked_tools'])
 
+    def test_analysis_page_limit_changes_do_not_bypass_repeat_guard(self):
+        receipt = {'revision_id': self.head, 'faces': [{'id': 'body-2/face-0'}], 'next_face_offset': None}
+        turns = [self.turn('analysis_context', receipt, response=packed({'tool': 'analysis_context',
+                 'arguments': {'body_ids': ['body-2'], 'offset': 0, 'limit': limit}})) for limit in (12, 24)]
+        progress = planning_progress(self.task, turns)
+        self.assertTrue(progress['recovery_required'])
+        self.assertIn('analysis_context', progress['blocked_tools'])
+        turns[1]['revision'] = 'different-revision'
+        self.assertNotIn('analysis_context', planning_progress(self.task, turns)['blocked_tools'])
+
+    def test_analysis_setup_survives_intervening_reads_without_excerpt_loss(self):
+        revision = self.ws.revision(self.project, self.head)
+        revision['document']['geometry'] = 'a' * 64
+        receipt = {'revision_id': self.head, 'artifact_id': 'a' * 64,
+                   'faces': [{'id': 'body-2/face-0', 'description': 'surface geometry ' * 200}],
+                   'next_face_offset': None, 'saved_study': {'large': 'duplicate'}}
+        setup = self.turn('analysis_context', receipt)
+        with patch.object(self.ws, 'revision', return_value=revision), patch.object(self.ws.artifacts, 'manifest', side_effect=FileNotFoundError):
+            compiled, meta = self.compile([setup])
+            self.assertEqual(compiled['analysis_setup']['faces'], receipt['faces'])
+            self.assertNotIn('saved_study', compiled['analysis_setup'])
+            self.assertEqual(compiled['latest_observation']['receipt']['data_in'], 'analysis_setup')
+            compiled, meta = self.compile([setup, self.turn('read_tool_result', {'text': 'details'})])
+            self.assertEqual(compiled['analysis_setup']['faces'], receipt['faces'])
+            self.assertEqual(compiled['workflow_phase'], 'analysis')
+            self.assertLessEqual(meta['characters'], 24000)
+            setup['epoch'] = 1
+            compiled, _ = self.compile([setup])
+            self.assertIsNone(compiled['analysis_setup'])
+
     def test_saved_preview_narrows_tools_and_uses_low_reasoning_for_empty_build(self):
         compiled = {'revision_id':self.head,'epoch':2,'project':{'geometry':'a'*64,'modeling_requirements':[{}]},
                     'task_focus':{}, 'cad_api_signatures':[{'symbol':'u.create_box','signature':'create_box()'}],

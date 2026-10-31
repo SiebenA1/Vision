@@ -7,7 +7,7 @@ import time
 
 from .storage import Conflict, Missing, identity, packed
 from .task_memory import context
-from .task_tools import execute, prepare
+from .task_tools import analysis_receipt, execute, prepare
 from .queries import QueryUnavailable
 from . import model_tasks
 from .engineering_memory import parents, checkpoint
@@ -295,7 +295,7 @@ class Tasks:
                                        (time.time(), task_id))
                         return
                     raise ValueError("task native job did not succeed: " + (job["error"] or job["state"]))
-                receipt = {"job": job, "origin": "verified_tool_receipt"}
+                receipt = analysis_receipt(job) if tool == "solve" else {"job": job, "origin": "verified_tool_receipt"}
                 revision = job.get("adopted_revision") or task["revision"]
                 if tool == 'build_geometry':
                     from .modeling import assess_geometry

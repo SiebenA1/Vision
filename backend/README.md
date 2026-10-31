@@ -6,14 +6,19 @@ own workspace; it never silently imports or overwrites legacy projects.
 
 ```powershell
 .python313/python.exe -m pip --disable-pip-version-check install -r backend/requirements.txt
-.python313/python.exe -m backend.vision --port 8112
 npm run dev
 ```
 
 Open the [workbench](http://127.0.0.1:4173/) or
 [API documentation](http://127.0.0.1:8112/docs). Vite proxies `/api/v2` to port
-8112; set `VISION_CORE_URL` to use another independently managed core.
-Default data directory is `.vision-workspace`; override with `--workspace PATH`.
+8112 and automatically starts or reuses a healthy v2 core. Set `VISION_CORE_PORT`
+for another managed port, or `VISION_CORE_URL` for an independently managed core
+(automatic startup is then disabled). Stopping Vite stops only a core it started.
+Default data directory is `.vision-workspace`; override with `VISION_CORE_WORKSPACE`.
+For independent operation use `npm run core` or
+`.python313/python.exe -m backend.vision --port 8112 --workspace PATH`.
+For one-command Windows environment setup and launch, run
+`powershell -ExecutionPolicy Bypass -File scripts/start-local.ps1`.
 For local semantic memory, install `backend/requirements-memory.txt` and run
 `.python313/python.exe scripts/setup_memory.py` once. Open “工程记忆与上下文”
 in the conversation pane to review/correct memory and inspect compiled context.
