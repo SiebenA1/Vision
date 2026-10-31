@@ -1,7 +1,8 @@
 """Offline evidence for the Harness proposal; no model calls or project writes.
 
 Run from the repository root with .python313/python.exe.
-This measures current behavior, not the proposed implementation's speedup.
+The synchronous-step probe is a baseline diagnostic, not the current async model
+path. Async lifecycle regressions live in tests/test_model_io_v2.py.
 """
 import io
 import json
@@ -43,7 +44,8 @@ def scheduler_probe():
             second.set()
             stop.set()
 
-    runner = SimpleNamespace(workspace=SimpleNamespace(db=Database), stop=stop, step=step)
+    runner = SimpleNamespace(workspace=SimpleNamespace(db=Database), stop=stop, step=step,
+                             reconcile_requests=lambda: None, schedule_cursor=0)
     worker = threading.Thread(target=Tasks.loop, args=(runner,))
     worker.start()
     try:
@@ -54,10 +56,11 @@ def scheduler_probe():
         worker.join(5)
         stop.set()
     assert not worker.is_alive(), 'probe worker leaked'
-    assert blocked and second.is_set(), 'current scheduler behavior changed'
+    assert blocked and second.is_set(), 'synchronous step diagnostic changed'
     return {'actual_method': 'Tasks.loop', 'step_body': 'event-controlled fake model wait',
             'second_task_blocked_during_first_wait': blocked,
-            'second_task_proceeded_after_release': second.is_set(), 'observation_window_ms': 150}
+            'second_task_proceeded_after_release': second.is_set(), 'observation_window_ms': 150,
+            'meaning': 'Blocking synchronous step diagnostic; production model requests now use a separate I/O service.'}
 
 
 def schema_probe():

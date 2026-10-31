@@ -237,34 +237,45 @@ def http_error(status, body):
     return ValueError(f'DeepSeek HTTP {status}: {detail} 本次未执行工具，未自动重发请求。')
 
 
-async def _send(request, key):
-    async with httpx.AsyncClient(timeout=httpx.Timeout(175, connect=5), follow_redirects=False, trust_env=False) as client:
-        async with client.stream("POST", URL, headers={"Authorization": "Bearer " + key}, json=request) as response:
-            if response.status_code != 200:
-                diagnostic = bytearray()
-                async for chunk in response.aiter_bytes():
-                    diagnostic.extend(chunk[:16384 - len(diagnostic)])
-                    if len(diagnostic) >= 16384:
-                        break
-                raise http_error(response.status_code, diagnostic)
-            body = bytearray()
+def client():
+    return httpx.AsyncClient(timeout=httpx.Timeout(175, connect=5), follow_redirects=False, trust_env=False)
+
+
+async def _send(request, key, connection):
+    async with connection.stream("POST", URL, headers={"Authorization": "Bearer " + key}, json=request) as response:
+        if response.status_code != 200:
+            diagnostic = bytearray()
             async for chunk in response.aiter_bytes():
-                body.extend(chunk)
-                if len(body) > 262144:
-                    raise ValueError("DeepSeek response exceeds 256 KiB")
-            return json.loads(body)
+                diagnostic.extend(chunk[:16384 - len(diagnostic)])
+                if len(diagnostic) >= 16384:
+                    break
+            raise http_error(response.status_code, diagnostic)
+        body = bytearray()
+        async for chunk in response.aiter_bytes():
+            body.extend(chunk)
+            if len(body) > 262144:
+                raise ValueError("DeepSeek response exceeds 256 KiB")
+        return json.loads(body)
 
 
-def complete(request):
+async def complete_async(request, connection):
     key = api_key()
     if not key:
         raise ValueError("DEEPSEEK_API_KEY is not configured on the backend")
     try:
-        return asyncio.run(asyncio.wait_for(_send(request, key), timeout=180))
+        return await asyncio.wait_for(_send(request, key, connection), timeout=180)
     except (httpx.HTTPError, TimeoutError):
         raise ValueError("DeepSeek request failed or timed out; outcome may be unknown, no automatic retry") from None
     except (json.JSONDecodeError, UnicodeDecodeError):
         raise ValueError("DeepSeek returned invalid JSON") from None
+
+
+def complete(request):
+    """Synchronous single-step entry for offline scripts and explicit test stepping."""
+    async def once():
+        async with client() as connection:
+            return await complete_async(request, connection)
+    return asyncio.run(once())
 
 
 def parse(response, model):

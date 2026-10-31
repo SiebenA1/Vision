@@ -1,6 +1,7 @@
 """Typed local task tools. All project writes use the existing fenced command path."""
 import json
 import ast
+from functools import lru_cache
 
 from pydantic import Field, model_validator
 from typing import Annotated, Literal
@@ -187,7 +188,8 @@ TOOL_MODELS = {"preview_build": Build, "build_geometry": Build, "configure_study
     'read_code_module':ReadCodeModule,'patch_code_module':PatchCodeModule,'read_code_assembly':ReadCodeAssembly}
 
 
-def tool_schemas():
+@lru_cache(maxsize=1)
+def _schema_templates():
     tools = []
     for name, model in TOOL_MODELS.items():
         schema = model.model_json_schema()
@@ -228,7 +230,13 @@ def tool_schemas():
                 'set_modeling_requirements': 'Register the complete current modeling requirements grounded in source_ids before a build. Preserve unchanged prior requirements. Numeric min/max bounds use actual global bbox dimensions in mm, volume in mm3, or body counts. Record unsupported shape/assembly features as metric=manual; never omit them or invent numerical targets.',
                 'check_modeling': 'Check the current artifact against registered modeling requirements. Manual features remain unknown. This does not verify unregistered features, overall shape, or structural safety.',
                 "finish": "End the reply. outcome=answer for discussion; built for constructed geometry without full checks, partial for incomplete geometry, verified only when all registered checks pass. Include remaining limitations in summary. Backend validates against current geometry; it is not engineering certification."}.get(name, name)}})
-    return tools
+    return packed(tools)
+
+
+def tool_schemas():
+    # Every projection owns its nested dictionaries; phase pruning cannot mutate
+    # the immutable cached definitions used by a different task or step.
+    return json.loads(_schema_templates())
 
 
 def prepare(task, item, turns, workspace=None):

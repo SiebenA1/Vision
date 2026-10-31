@@ -11,26 +11,50 @@ from .task_tools import analysis_receipt, execute, prepare
 from .queries import QueryUnavailable
 from . import model_tasks
 from .engineering_memory import parents, checkpoint
+from .model_io import ModelIO
 
 ACTIVE = ("created", "executing", "waiting_job")
 
 
 class Tasks:
-    def __init__(self, workspace, queries):
+    def __init__(self, workspace, queries, *, model_transport=None):
         self.workspace, self.queries = workspace, queries
         self.stop = threading.Event()
         self.thread = None
+        self.model_transport = model_transport
+        self.model_io = None
+        self.model_requests = {}
+        self.schedule_cursor = 0
 
     def start(self):
+        self.model_io = ModelIO(self.model_transport)
+        try:
+            self.model_io.start()
+        except Exception:
+            self.model_io.close()
+            raise
         self.thread = threading.Thread(target=self.loop, name="vision-tasks", daemon=True)
-        self.thread.start()
+        try:
+            self.thread.start()
+        except Exception:
+            self.model_io.close()
+            raise
 
     def close(self):
         self.stop.set()
-        if self.thread:
+        if self.model_io:
+            self.model_io.cancel_all()
+        if self.thread and self.thread.ident is not None:
             self.thread.join(timeout=25)
             if self.thread.is_alive():
                 raise RuntimeError("task runner did not stop; controller ownership must be retained")
+        if self.model_io:
+            self.model_io.close()
+            for prepared in self.model_requests.values():
+                task = prepared['task']
+                self.update(task['id'], task['epoch'], 'waiting_user',
+                            'model request stopped during shutdown; outcome may be unknown, no automatic retry')
+            self.model_requests.clear()
 
     def row(self, db, task):
         value = db.execute("SELECT * FROM agent_tasks WHERE id=?", (task,)).fetchone()
@@ -140,7 +164,10 @@ class Tasks:
             db.execute("UPDATE agent_tasks SET revision=?,epoch=?,state=?,source=?,config=?,summary='',error=NULL,turns=0,jobs=0,updated=? WHERE id=?",
                        (revision, epoch, state, source, packed(config), time.time(), task))
             return {"task_id": task, "epoch": epoch, "state": state}
-        return self.receipt("correct_model_task" if model else "correct_task" if correct else "stop_task", {**request, "task_id": task}, change)
+        result = self.receipt("correct_model_task" if model else "correct_task" if correct else "stop_task", {**request, "task_id": task}, change)
+        if self.model_io:
+            self.model_io.cancel_owner(task, request['expected_epoch'])
+        return result
 
     def forget(self, project, request):
         def forget(db):
@@ -194,6 +221,11 @@ class Tasks:
             return {"forgotten_source_ids": sorted(affected), "cancelled_task_ids": sorted(tasks),
                     "retained": "Committed project revisions, engineering artifacts and existing exported backups are retained."}
         result = self.receipt("forget_source", {**request, "project_id": project}, forget)
+        if self.model_io:
+            for task in result['cancelled_task_ids']:
+                with self.workspace.db() as db:
+                    current = self.row(db, task)
+                self.model_io.cancel_owner(task, current['epoch'] - 1)
         from .retrieval import clear_project_cache
         clear_project_cache(self.workspace, project)
         return result
@@ -211,8 +243,13 @@ class Tasks:
 
     def loop(self):
         while not self.stop.is_set():
+            self.reconcile_requests()
             with self.workspace.db() as db:
                 ids = [row[0] for row in db.execute("SELECT id FROM agent_tasks WHERE state IN ('created','executing','waiting_job') ORDER BY created LIMIT 8")]
+            if ids:
+                offset = self.schedule_cursor % len(ids)
+                ids = ids[offset:] + ids[:offset]
+                self.schedule_cursor += 1
             for task in ids:
                 if self.stop.is_set():
                     break
@@ -222,9 +259,30 @@ class Tasks:
                     logging.exception("local task checkpoint failed; retrying reconciliation")
             self.stop.wait(.2)
 
+    def reconcile_requests(self):
+        """Cancel obsolete I/O, including project deletion outside task endpoints."""
+        for key, prepared in list(self.model_requests.items()):
+            task = prepared['task']
+            with self.workspace.db() as db:
+                current = db.execute('SELECT epoch,state FROM agent_tasks WHERE id=?', (task['id'],)).fetchone()
+                head = db.execute('SELECT head FROM projects WHERE id=?', (task['project'],)).fetchone()
+            obsolete = (not current or current['epoch'] != task['epoch'] or current['state'] != 'executing'
+                        or not head or head[0] != task['revision'])
+            if obsolete:
+                self.model_io.cancel(key)
+                result = self.model_io.take(key)
+                if result is not None:
+                    del self.model_requests[key]
+                    if current and current['epoch'] == task['epoch'] and current['state'] == 'executing':
+                        self.update(task['id'], task['epoch'], 'waiting_user', 'project changed during model request; no tool executed')
+
     def step(self, task_id):
         task, turns = self.snapshot(task_id)
         if task["state"] not in ACTIVE:
+            return
+        if task['state'] != 'waiting_job' and any(
+                entry['task']['project'] == task['project'] and entry['task']['id'] != task_id
+                for entry in self.model_requests.values()):
             return
         epoch, config = task["epoch"], json.loads(task["config"])
         try:
@@ -238,7 +296,19 @@ class Tasks:
                 return
             pending = next((turn for turn in turns if turn["epoch"] == epoch and turn["state"] in ("requesting_model", "executing", "waiting_job")), None)
             if pending and pending["state"] == "requesting_model":
-                raise ValueError("model request outcome unknown after interruption; no automatic retry, submit a correction")
+                prepared = self.model_requests.get(pending['id'])
+                if not prepared:
+                    raise ValueError("model request outcome unknown after interruption; no automatic retry, submit a correction")
+                result = self.model_io.take(pending['id'])
+                if result is None:
+                    return
+                del self.model_requests[pending['id']]
+                if result.error:
+                    raise result.error
+                task, turns, config = (prepared[key] for key in ('task', 'turns', 'config'))
+                pending = model_tasks.settle_request(self, prepared, result.response, result.duration_ms)
+                if pending is None:
+                    return
             if not pending:
                 if config["mode"] != model_tasks.MODE and task["turns"] >= len(config["plan"]):
                     with self.workspace.db() as db:

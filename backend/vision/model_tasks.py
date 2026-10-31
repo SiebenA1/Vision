@@ -11,6 +11,7 @@ from .storage import Conflict, identity, packed
 from .task_memory import context
 from .task_tools import prepare, CadScriptError
 from .modeling import CompletionError
+from .tool_admission import ToolAdmission
 
 MODE = "deepseek/1"
 
@@ -126,7 +127,8 @@ def configuration(request, root=None):
         "started_at": time.time(), "max_seconds": 600, "data_scope": "deepseek-project-context/1"}
 
 
-def next_step(runner, task, turns, config):
+def prepare_request(runner, task, turns, config):
+    prepared_at = time.monotonic()
     if not config.get("unlimited") and (task["turns"] >= config["max_requests"] or time.time() - config["started_at"] > config["max_seconds"]):
         raise ValueError("model request/time budget reached; submit an explicit correction to continue")
     repairing = bool(turns and turns[-1]["epoch"] == task["epoch"] and turns[-1]["state"] == "rejected")
@@ -140,7 +142,11 @@ def next_step(runner, task, turns, config):
     compiled_text = packed(compiled)
     metadata.update(characters=len(compiled_text), sha256=hashlib.sha256(compiled_text.encode()).hexdigest(),
                     estimated_text_tokens_upper_bound=len(compiled_text.encode("utf-8")))
+    context_ms = round((time.monotonic() - prepared_at) * 1000, 3)
+    schema_at = time.monotonic()
     request = provider.payload(compiled, config["model"])
+    admission = ToolAdmission.capture(request['tools'])
+    schema_ms = round((time.monotonic() - schema_at) * 1000, 3)
     if repairing:
         request['messages'][0]['content'] += '\n' + (
             "Your previous tool response was rejected and NONE were executed. Read last_tool_rejection in the project data. "
@@ -159,7 +165,10 @@ def next_step(runner, task, turns, config):
     reservation = len(packed(request).encode()) + request["max_tokens"]
     if not config.get("unlimited") and config["used_tokens"] + reservation > config["max_total_tokens"]:
         raise ValueError("model token budget cannot cover another bounded request")
-    metadata.update(payload_sha256=hashlib.sha256(packed(request).encode()).hexdigest(), reserved_tokens=reservation)
+    metadata.update(payload_sha256=hashlib.sha256(packed(request).encode()).hexdigest(), reserved_tokens=reservation,
+                    timings_ms={"context": context_ms, "payload": schema_ms},
+                    payload_bytes=len(packed(request).encode()), offered_tools=len(request["tools"]),
+                    execution_policy="bounded-model-io/1", tool_admission_sha256=admission.sha256)
     pending = {"id": identity(), "state": "requesting_model", "arguments": None,
                "response": packed({"tool": "model_request", "request": metadata})}
     with runner.workspace.db() as db:
@@ -184,13 +193,39 @@ def next_step(runner, task, turns, config):
     current, _ = runner.snapshot(task["id"])
     if current["epoch"] != task["epoch"] or current["state"] != "executing" or runner.stop.is_set():
         raise Conflict("task stopped before model transmission")
+    return {"task": task, "turns": turns, "config": config, "compiled": compiled,
+            "metadata": metadata, "request": request, "reservation": reservation, "pending": pending,
+            "admission": admission}
+
+
+def next_step(runner, task, turns, config):
+    io = getattr(runner, 'model_io', None)
+    if io is not None and not io.available():
+        return None
+    prepared = prepare_request(runner, task, turns, config)
+    if io is not None:
+        key = prepared['pending']['id']
+        runner.model_requests[key] = prepared
+        try:
+            io.submit(key, (task['id'], task['epoch']), prepared['request'])
+        except Exception:
+            del runner.model_requests[key]
+            raise
+        return None
     started = time.monotonic()
-    response = provider.complete(request)
+    response = provider.complete(prepared['request'])
+    return settle_request(runner, prepared, response, round((time.monotonic() - started) * 1000, 3))
+
+
+def settle_request(runner, prepared, response, duration_ms):
+    task, turns, config = (prepared[key] for key in ('task', 'turns', 'config'))
+    compiled, metadata, request, reservation, pending = (prepared[key] for key in
+        ('compiled', 'metadata', 'request', 'reservation', 'pending'))
     try:
         item, receipt = provider.parse(response, config["model"])
     except provider.MultipleToolCalls as error:
         receipt = error.receipt
-        receipt['duration_ms'] = round((time.monotonic() - started)*1000, 3)
+        receipt['duration_ms'] = duration_ms
         if receipt["usage"]["total_tokens"] > reservation:
             raise ValueError("provider token usage exceeds request reservation")
         config["used_tokens"] += receipt["usage"]["total_tokens"]
@@ -204,7 +239,7 @@ def next_step(runner, task, turns, config):
         if repair_exhausted(task, turns, receipt.get('rejection_kind', 'multiple_calls')):
             raise ValueError(str(error) + " 自动纠正仍未满足协议，任务已暂停，请提交纠正。")
         return None
-    receipt["duration_ms"] = round((time.monotonic() - started) * 1000, 3)
+    receipt["duration_ms"] = duration_ms
     if receipt["usage"]["total_tokens"] > reservation:
         raise ValueError("provider token usage exceeds request reservation")
     config["used_tokens"] += receipt["usage"]["total_tokens"]
@@ -228,7 +263,7 @@ def next_step(runner, task, turns, config):
             proposed=item['arguments']
             if proposed.get('script') or proposed.get('script_edits'):
                 raise CadScriptError('当前模型由代码模块组成；请 patch_code_module 更新模块版本，或用 assembly_edits 修改实例参数，再预检构建。')
-        if item["tool"] not in {tool["function"]["name"] for tool in request["tools"]}:
+        if not prepared['admission'].contains(item['tool']):
             if item['tool'] == 'build_geometry' and compiled['project'].get('geometry') and not compiled.get('latest_build_preview'):
                 raise CadScriptError('现有模型尚无当前版本、当前轮次的有效预检。本轮未提交作业。请先 preview_build，再 build_geometry({})。')
             if compiled['planning_progress']['recovery_required']:
@@ -236,6 +271,10 @@ def next_step(runner, task, turns, config):
                     raise CadScriptError('检测到工况信息重复读取，本轮未执行工具。请复用 analysis_setup 配置工况，或一次询问缺少的物理条件。')
                 raise CadScriptError('检测到接口查询或协议纠正持续空转，本轮未执行工具。请使用已知能力完成下一步预检/构建，或如实说明具体阻碍。')
             raise CadScriptError('tool was not offered for this request; use only the offered tools and current workflow stage')
+        try:
+            prepared['admission'].validate_surface(item)
+        except ValueError as error:
+            raise CadScriptError(str(error)) from None
         arguments = prepare(task, item, turns, runner.workspace)
         if item['tool'] == 'finish':
             from .modeling import completion

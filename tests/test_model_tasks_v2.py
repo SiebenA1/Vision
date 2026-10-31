@@ -290,8 +290,10 @@ class NativeModelTaskTest(unittest.TestCase):
                 return response('set_modeling_requirements', {'requirements':[{'name':'100mm轴向梁', 'metric':'bbox_x_mm',
                     'minimum':99.99, 'maximum':100.01, 'source_ids':[compiled['statement_source_id']]}]}, 'goal')
             return next(replies)
-        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as folder, patch("backend.vision.provider.api_key", return_value="test-only-key"), patch("backend.vision.provider.complete", side_effect=model_reply):
-            with TestClient(create_app(folder)) as client:
+        async def transport(request, client):
+            return model_reply(request)
+        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as folder, patch("backend.vision.provider.api_key", return_value="test-only-key"):
+            with TestClient(create_app(folder, model_transport=transport)) as client:
                 project = client.post("/api/v2/projects", json=command("project", name="Native protocol")).json()
                 result = client.post(f"/api/v2/projects/{project['project_id']}/model-tasks", json=command("model", expected_head=project["revision_id"], statement="按明确工况核验轴向梁"))
                 self.assertEqual(result.status_code, 202, result.text)

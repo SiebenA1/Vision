@@ -29,18 +29,18 @@ from .task_tools import PatchCodeModule, ReadCodeAssembly
 from .contracts import BeamReference, VerifySolver
 
 
-def create_app(root, *, run_jobs=True, cad_timeout=240, fea_timeout=600):
+def create_app(root, *, run_jobs=True, cad_timeout=240, fea_timeout=600, model_transport=None):
     workspace = Workspace(root)
     controller = Controller(workspace, cad_timeout=cad_timeout, fea_timeout=fea_timeout)
     queries = Queries(workspace)
-    tasks = Tasks(workspace, queries)
+    tasks = Tasks(workspace, queries, model_transport=model_transport)
 
     @asynccontextmanager
     async def lifespan(app):
-        if run_jobs:
-            controller.start()
-            tasks.start()
         try:
+            if run_jobs:
+                controller.start()
+                tasks.start()
             yield
         finally:
             queries.close()
