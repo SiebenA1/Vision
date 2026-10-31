@@ -189,6 +189,18 @@ def retrieve(workspace, project, query, limit=6, revision=None):
         sync_lexical(workspace)
         with workspace.db() as db:
             current = workspace._revision(db, project, revision)
+            generation = db.execute('SELECT value FROM retrieval_state WHERE key=?', ('source_generation:' + project,)).fetchone()
+            cache_key = hashlib.sha256(packed({'project': project, 'revision': current['revision_id'],
+                'source_generation': generation[0] if generation else '0',
+                'query': query, 'limit': limit, 'semantic': os.environ.get('VISION_MEMORY_SEMANTIC', '1'),
+                'models': (CACHE / 'ready.json').stat().st_mtime_ns if (CACHE / 'ready.json').is_file() else None}).encode()).hexdigest()
+            cache = getattr(workspace, 'retrieval_results', None)
+            if cache is None:
+                workspace.retrieval_results = cache = {}
+            if cache_key in cache:
+                result, metadata = copy.deepcopy(cache[cache_key])
+                return result, {**metadata, 'result_cache_hit': True, 'original_query_characters': original_query_characters,
+                                'duration_ms': round((time.monotonic() - started) * 1000, 2)}
             rows = {row["id"]: json.loads(row["payload"]) for row in db.execute("SELECT id,payload FROM sources WHERE project=? ORDER BY created,id", (project,))}
             availability = {}
             valid = {key for key, value in rows.items() if available(rows, key, availability)
@@ -208,16 +220,6 @@ def retrieve(workspace, project, query, limit=6, revision=None):
                 lexical.append(row[0])
                 if len(counts) >= 24:
                     break
-        cache_key = hashlib.sha256(packed({"project":project,"revision":current["revision_id"],"sources":rows,
-            "query":query,"limit":limit,"semantic":os.environ.get("VISION_MEMORY_SEMANTIC","1"),
-            "models":(CACHE / "ready.json").stat().st_mtime_ns if (CACHE / "ready.json").is_file() else None}).encode()).hexdigest()
-        cache = getattr(workspace, "retrieval_results", None)
-        if cache is None:
-            workspace.retrieval_results = cache = {}
-        if cache_key in cache:
-            result, metadata = copy.deepcopy(cache[cache_key])
-            return result, {**metadata, "result_cache_hit":True, 'original_query_characters': original_query_characters,
-                            "duration_ms":round((time.monotonic()-started)*1000,2)}
         dense, reranker, degraded = [], None, None
         try:
             if os.environ.get("VISION_MEMORY_SEMANTIC", "1") == "0":

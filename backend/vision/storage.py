@@ -163,6 +163,21 @@ class Workspace:
                 CREATE TABLE IF NOT EXISTS retrieval_vectors(id TEXT NOT NULL REFERENCES retrieval_chunks(id) ON DELETE CASCADE, model TEXT NOT NULL, vector TEXT NOT NULL, PRIMARY KEY(id,model));
                 CREATE VIRTUAL TABLE IF NOT EXISTS retrieval_fts USING fts5(id UNINDEXED, project UNINDEXED, tokens);
                 CREATE TABLE IF NOT EXISTS retrieval_state(key TEXT PRIMARY KEY, value TEXT NOT NULL);
+                CREATE TRIGGER IF NOT EXISTS retrieval_generation_insert AFTER INSERT ON sources BEGIN
+                    INSERT INTO retrieval_state VALUES('source_generation:' || new.project,'1')
+                    ON CONFLICT(key) DO UPDATE SET value=CAST(retrieval_state.value AS INTEGER)+1;
+                END;
+                CREATE TRIGGER IF NOT EXISTS retrieval_generation_update AFTER UPDATE ON sources BEGIN
+                    INSERT INTO retrieval_state VALUES('source_generation:' || new.project,'1')
+                    ON CONFLICT(key) DO UPDATE SET value=CAST(retrieval_state.value AS INTEGER)+1;
+                    INSERT INTO retrieval_state SELECT 'source_generation:' || old.project,'1' WHERE old.project<>new.project
+                    ON CONFLICT(key) DO UPDATE SET value=CAST(retrieval_state.value AS INTEGER)+1;
+                END;
+                CREATE TRIGGER IF NOT EXISTS retrieval_generation_delete AFTER DELETE ON sources BEGIN
+                    INSERT INTO retrieval_state VALUES('source_generation:' || old.project,'1')
+                    ON CONFLICT(key) DO UPDATE SET value=CAST(retrieval_state.value AS INTEGER)+1;
+                END;
+                INSERT OR IGNORE INTO retrieval_state SELECT 'source_generation:' || id,'0' FROM projects;
                 CREATE TABLE IF NOT EXISTS workspace_settings(key TEXT PRIMARY KEY, value TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS verification_runs(id TEXT PRIMARY KEY, suite TEXT NOT NULL, state TEXT NOT NULL, input TEXT NOT NULL, result TEXT, error TEXT, phase TEXT, created REAL NOT NULL, updated REAL NOT NULL);
                 CREATE TABLE IF NOT EXISTS context_snapshots(turn TEXT PRIMARY KEY REFERENCES agent_turns(id) ON DELETE CASCADE, project TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE, sha256 TEXT NOT NULL, payload BLOB NOT NULL);

@@ -1,0 +1,11 @@
+{
+  "sources": 10000,
+  "iterations": 12,
+  "warm_p50_ms": 134.421,
+  "warm_max_ms": 172.61,
+  "method": "Disposable lexical-only workspace; unchanged warm query; no provider calls or p95 claim.",
+  "after_warm_p50_ms": 3.939,
+  "after_warm_max_ms": 6.181,
+  "baseline_commit": "7d07566",
+  "fixture": "Generated 10000 independent source records, each about 200 text characters; one lexical match."
+}
