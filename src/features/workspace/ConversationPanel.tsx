@@ -5,7 +5,7 @@ import { ArrowUp, BrainCircuit, ChevronDown, LoaderCircle, Square, Sparkles } fr
 import type { MemorySeed } from './MemoryPanel';
 
 interface Message { id: string; role: string; text: string; revision_id?: string; completion?: ModelCompletion | null; reference?: { artifact_id: string; selection: string[] } | null }
-interface Task { id: string; epoch: number; state: string; error: string | null; turns: number; jobs: number; config: { used_tokens?: number }; steps: Array<{ epoch: number; response: { tool: string } | null; receipt?: { revision_id?: string } | null; state: string }> }
+interface Task { id: string; epoch: number; state: string; error: string | null; turns: number; jobs: number; current_epoch_reported_tokens?: number | null; config: { used_tokens?: number }; steps: Array<{ epoch: number; response: { tool: string } | null; receipt?: { revision_id?: string } | null; state: string }> }
 interface Conversation { messages: Message[]; task: Task | null }
 interface Health { model: { configured: boolean; model: string }; features?: string[] }
 const states: Record<string, string> = { created: '准备执行', executing: '正在处理', waiting_job: '原生工程计算中', waiting_user: '等待你的回复或处理', completed: '已回复', cancelled: '已停止' };
@@ -99,7 +99,7 @@ export function ConversationPanel({ project, revision, artifact, selection, refe
         {message.role === 'user' && <button className="chat-remember" title={active ? '先停止当前执行，再整理要求' : '从这条消息记录工程要求'} disabled={active} onClick={() => onMemory({ id: message.id, text: message.text })}>记为要求</button>}
       </article>)}
       {data.task && <div className="conversation-execution" role="status"><strong>{active && <span className="status-dot online" />}{states[data.task.state] ?? data.task.state}</strong>
-        <details><summary>执行记录 · {data.task.turns} 步</summary><p>本轮 {data.task.turns} 次模型请求 · {data.task.jobs} 个原生作业 · 累计已报告 {data.task.config.used_tokens ?? 0} token</p></details>
+        <details><summary>执行记录 · {data.task.turns} 步</summary><p>本轮 {data.task.turns} 次模型请求 · {data.task.jobs} 个原生作业{data.task.current_epoch_reported_tokens != null && ` · 本轮已报告 ${data.task.current_epoch_reported_tokens} token`} · 对话累计已报告 {data.task.config.used_tokens ?? 0} token</p></details>
         {active && <p>{step?.response?.tool ? `当前步骤：${step.response.tool}` : '正在分析需求…'}</p>}
         {data.task.error && <p className="core-error">{data.task.error}</p>}
       </div>}

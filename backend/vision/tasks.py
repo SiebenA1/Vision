@@ -81,6 +81,9 @@ class Tasks:
             if turn["response"]:
                 turn["response"] = {key: turn["response"][key] for key in ("tool", "provider", "request", "execution") if key in turn["response"]}
         value["steps"] = turns if include_steps else []
+        value['current_epoch_reported_tokens'] = sum(
+            (turn['response'] or {}).get('provider', {}).get('usage', {}).get('total_tokens', 0)
+            for turn in turns if turn['epoch'] == value['epoch']) if include_steps else None
         return value
 
     def inputs(self, task):

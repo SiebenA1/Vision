@@ -11,6 +11,7 @@ from backend.vision.storage import packed
 from backend.vision.task_tools import execute, prepare
 from backend.vision.tool_admission import ToolAdmission
 import test_tasks_v2 as fixtures
+import test_model_tasks_v2 as model_fixtures
 
 
 class ReadBatchTest(unittest.TestCase):
@@ -111,3 +112,65 @@ class ReadBatchTest(unittest.TestCase):
         self.assertEqual(value['state'], 'cancelled')
         self.assertEqual([c['state'] for c in value['steps'][0]['receipt']['calls']],
                          ['cancelled', 'cancelled_before_start'])
+
+
+class ReadBatchRecoveryTest(unittest.TestCase):
+    setUp = model_fixtures.ModelTaskTest.setUp
+    tearDown = model_fixtures.ModelTaskTest.tearDown
+    create = model_fixtures.ModelTaskTest.create
+
+    def test_observed_3600_character_batch_is_rejected_then_repaired(self):
+        task = self.create()
+        source = self.tasks.get(task)['source']
+        bad = model_fixtures.response('read_batch', {'calls': [
+            {'tool': 'read_script', 'arguments': {'offset': 3800, 'limit': 3600}}]}, 'bad-range')
+        good = model_fixtures.response('read_batch', {'calls': [
+            {'tool': 'read_source', 'arguments': {'source_id': source, 'limit': 2000}}]}, 'fixed-range')
+        actual_payload = provider.payload
+        def payload(compiled, model):
+            return actual_payload({**compiled, 'project': {**compiled['project'], 'geometry': 'a' * 64}}, model)
+
+        with patch('backend.vision.provider.payload', side_effect=payload), \
+             patch('backend.vision.provider.complete', side_effect=[bad, good]):
+            with patch('backend.vision.tasks.execute') as execute:
+                self.tasks.step(task)
+                execute.assert_not_called()
+            value = self.tasks.get(task)
+            self.assertEqual(value['state'], 'executing')
+            self.assertEqual(value['steps'][0]['state'], 'rejected')
+            self.assertIn('2000', value['steps'][0]['error'])
+            self.tasks.step(task)
+        value = self.tasks.get(task)
+        self.assertEqual(value['steps'][1]['state'], 'succeeded')
+        self.assertEqual(value['steps'][1]['receipt']['calls'][0]['state'], 'succeeded')
+        self.assertEqual(value['current_epoch_reported_tokens'], 30)
+        self.assertEqual(value['config']['used_tokens'], 30)
+
+    def test_repeated_bad_range_pauses_after_bounded_repair(self):
+        task = self.create()
+        bad = lambda key: model_fixtures.response('read_batch', {'calls': [
+            {'tool': 'read_source', 'arguments': {'source_id': self.tasks.get(task)['source'], 'limit': 3600}}]}, key)
+        with patch('backend.vision.provider.complete', side_effect=[bad('bad-1'), bad('bad-2')]) as complete:
+            self.tasks.step(task)
+            self.tasks.step(task)
+            self.tasks.step(task)
+        self.assertEqual(complete.call_count, 2)
+        self.assertEqual(self.tasks.get(task)['state'], 'waiting_user')
+
+    def test_epoch_tokens_are_distinct_from_conversation_total(self):
+        from backend.vision import conversation
+        sent = conversation.send(self.tasks, self.project, fixtures.command('first-message', expected_head=self.head,
+            expected_task=None, expected_epoch=None, text='第一轮', artifact_id=None, selection=[]))
+        task = sent['task_id']
+        self.tasks.step(task)
+        with patch('backend.vision.provider.complete', return_value=model_fixtures.response('finish', {'summary': '第一轮'}, 'epoch-1')):
+            self.tasks.step(task)
+        conversation.send(self.tasks, self.project, fixtures.command('next-message', expected_head=self.head,
+            expected_task=task, expected_epoch=1, text='第二轮', artifact_id=None, selection=[]))
+        self.tasks.step(task)
+        with patch('backend.vision.provider.complete', return_value=model_fixtures.response('finish', {'summary': '第二轮'}, 'epoch-2')):
+            self.tasks.step(task)
+        value = self.tasks.get(task)
+        self.assertEqual(value['epoch'], 2)
+        self.assertEqual(value['current_epoch_reported_tokens'], 15)
+        self.assertEqual(value['config']['used_tokens'], 30)

@@ -2,18 +2,33 @@
 import json
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
-from .contracts import Contract
+from .contracts import Contract, Identity
 from .storage import Conflict, Missing, packed
 from .queries import QueryUnavailable
 
 READ_TOOLS = ('list_topology', 'read_script', 'read_source', 'read_tool_result')
 
 
+class ReadArguments(Contract):
+    query: str | None = Field(default=None, max_length=200)
+    source_id: Identity | None = None
+    turn_id: Identity | None = None
+    offset: int = Field(default=0, ge=0, le=1000000)
+    limit: int | None = Field(default=None, ge=1, le=2000,
+                              description='At most 2000 text characters; list_topology permits at most 8 entries.')
+
+
 class ReadCall(Contract):
     tool: Literal['list_topology', 'read_script', 'read_source', 'read_tool_result']
-    arguments: dict = Field(default_factory=dict)
+    arguments: ReadArguments = Field(default_factory=ReadArguments)
+
+    @model_validator(mode='after')
+    def bounded_topology(self):
+        if self.tool == 'list_topology' and self.arguments.limit is not None and self.arguments.limit > 8:
+            raise ValueError('批量拓扑读取每项最多 8 条；更大范围请使用单独的 list_topology 调用。')
+        return self
 
 
 class ReadBatch(Contract):
@@ -22,14 +37,12 @@ class ReadBatch(Contract):
 
 def prepare_calls(task, arguments, turns, workspace):
     from .task_tools import prepare
-    calls = ReadBatch.model_validate(arguments).model_dump()['calls']
+    calls = ReadBatch.model_validate(arguments).model_dump(exclude_none=True)['calls']
     for call in calls:
         args = call['arguments']
         bound = 8 if call['tool'] == 'list_topology' else 2000
         if 'limit' not in args:
             args['limit'] = bound
-        if type(args['limit']) is not int or not 1 <= args['limit'] <= bound:
-            raise ValueError('batch reads allow at most 8 topology entries or 2000 text characters per call')
         call['arguments'] = prepare(task, call, turns, workspace)
     return calls
 
