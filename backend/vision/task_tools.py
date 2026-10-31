@@ -2,6 +2,9 @@
 import json
 import ast
 from functools import lru_cache
+from dataclasses import dataclass
+from types import MappingProxyType
+from typing import Callable
 
 from pydantic import Field, model_validator
 from typing import Annotated, Literal
@@ -179,7 +182,7 @@ class ReadCodeAssembly(Contract):
     limit: int = Field(default=4,ge=1,le=8)
 
 
-TOOL_MODELS = {"preview_build": Build, "build_geometry": Build, "configure_study": ConfigureStudy,
+_PARAMETER_MODELS = {"preview_build": Build, "build_geometry": Build, "configure_study": ConfigureStudy,
     "solve": Solve, "assessment": Contract, "analysis_context": AnalysisContext, "beam_reference": BeamReference, "solver_validation": Contract, "search_sources": Query, "remember": Remember, "ask_user": Question,
     "read_source": SourceRange, "read_tool_result": ToolResultRange, "read_script": ScriptRange,
     "inspect_geometry": Selection, "list_topology": TopologyPage, "native_api": ApiQuery, "finish": Finish,
@@ -191,7 +194,8 @@ TOOL_MODELS = {"preview_build": Build, "build_geometry": Build, "configure_study
 @lru_cache(maxsize=1)
 def _schema_templates():
     tools = []
-    for name, model in TOOL_MODELS.items():
+    for name, definition in TOOL_REGISTRY.items():
+        model = definition.model
         schema = model.model_json_schema()
         for key in ("command_id", "idempotency_key", "expected_head"):
             schema["properties"].pop(key, None)
@@ -209,27 +213,7 @@ def _schema_templates():
             schema['properties']['assembly_edits']={'type':'array','items':edit_schema,'minItems':1,'maxItems':24}
             schema['properties']['base_assembly_artifact']={'type':'string','pattern':'^[a-f0-9]{64}$'}
         tools.append({"type": "function", "function": {"name": name, "parameters": schema,
-            "description": {"native_api": "Read installed CAD signatures. Batch up to 4 lookups with queries=[{query:'create_cylinder'},{query:'linear_sweep'}] in ONE call. Space or | separated keywords match alternatives. Functions and exact names rank first. Reuse cad_api_reference from context; do not query known signatures again. suggest_query is not a parameter.",
-                'register_code_module':'Register immutable Python for one reusable local-coordinate Brep in result. Declare parameter types/units/bounds, source IDs and optional requirement bindings. Syntax checked, not geometry verified. Code is stored outside dialogue. Modules receive u, parameters, params and declared dependency parts as copies.',
-                'search_code_modules':'Find project-scoped compatible module interfaces by tags, parameter names and text; semantic=true enables optional local reranking. Returns exact version references, no source code.',
-                'read_code_module':'Read a bounded source range of one exact module version. Do not reconstruct modules from historical prose.',
-                'patch_code_module':'Create a new immutable version from exact unique text replacements at code_revision; preserve the module contract and link new source IDs.',
-                'read_code_assembly':'Read a bounded slice or one component of the current exact assembly plan, including parameter and placement bindings. No Python code is replayed.',
-                "list_topology": "List current artifact's body/face/edge IDs, bounding boxes and geometric metrics; paginated. Use before querying unknown topology IDs.",
-                "inspect_geometry": "Measure explicit IDs from list_topology, or resolve a known point; this does not list or discover all topology.",
-                "analysis_context": "Read the current static-analysis scope, exact face IDs/bounds/areas, saved study, conflicts, supported physics and missing physical inputs. Call before planning a static study. Optional body_ids selects planning scope without saving it; paginate faces with offset/limit. No solver or model is run.",
-                "configure_study": "Configure material, fixed supports and total-force loads. face=x-min/x-max/y-min/y-max/z-min/z-max selects bounding faces; precise regions are optional.",
-                "preview_build": "Preview edits to existing geometry. Prefer parameters={existing_name:value}, or script_edits=[{old_text:'exact unique snippet',new_text:'replacement'}] with base_script_sha256 for local code changes; omit script/use_current/replay_of. Reuses saved code and original inputs; never guesses a replacement target. Read a bounded range if needed. Full script only for a full redesign. After preview call build_geometry({}).",
-                "assessment": "Read deterministic engineering evidence; missing evidence is unknown.",
-                "beam_reference": "Independent rectangular axial-bar or Euler-Bernoulli cantilever calculation. Explicit mm/N/MPa/kg inputs required; not a CAD-part simulation or certification.",
-                "solver_validation": "Read latest completed benchmark for the current solver implementation. Does not run a benchmark or certify the current part. Missing report means unknown.",
-                "remember": "Save a concise requirement, decision or open question grounded in source_ids from context. Use supersedes to explicitly replace old memory. Summaries are not solver evidence; never invent sources.",
-                "read_source": "Expand a retrieved source or historical tool receipt in bounded chunks. Verify its revision before using it as evidence.",
-                "read_tool_result": "Expand a saved tool instruction, receipt or failure by turn_id in bounded chunks. Latest observations provide this reference. Check revision and state before using it.",
-                "ask_user": "Pause for required missing information; never invent loads, material or constraints.",
-                'set_modeling_requirements': 'Register the complete current modeling requirements grounded in source_ids before a build. Preserve unchanged prior requirements. Numeric min/max bounds use actual global bbox dimensions in mm, volume in mm3, or body counts. Record unsupported shape/assembly features as metric=manual; never omit them or invent numerical targets.',
-                'check_modeling': 'Check the current artifact against registered modeling requirements. Manual features remain unknown. This does not verify unregistered features, overall shape, or structural safety.',
-                "finish": "End the reply. outcome=answer for discussion; built for constructed geometry without full checks, partial for incomplete geometry, verified only when all registered checks pass. Include remaining limitations in summary. Backend validates against current geometry; it is not engineering certification."}.get(name, name)}})
+            "description": definition.description}})
     return packed(tools)
 
 
@@ -342,137 +326,276 @@ def prepare(task, item, turns, workspace=None):
     return model(**arguments).model_dump(exclude_none=True)
 
 
-def execute(workspace, queries, task, tool, arguments):
-    project, fence = task["project"], (task["id"], task["epoch"])
-    if tool in ('register_code_module','search_code_modules','read_code_module','patch_code_module','read_code_assembly'):
-        from . import code_modules
-        if tool=='register_code_module':return code_modules.register(workspace,project,arguments,fence)
-        if tool=='patch_code_module':return code_modules.patch_module(workspace,project,arguments,fence)
-        if tool=='read_code_module':return code_modules.read(workspace,project,arguments)
-        if tool=='read_code_assembly':return code_modules.read_assembly(workspace,project,arguments)
-        return code_modules.search(workspace,project,arguments)
-    if tool == 'analysis_context':
-        from .analysis_context import analysis_context
-        document = workspace.revision(project, task['revision'])['document']
-        source = {}
-        if task.get('source'):
-            with workspace.db() as db:
-                row = db.execute('SELECT payload FROM sources WHERE id=? AND project=?', (task['source'], project)).fetchone()
-            source = json.loads(row[0]) if row else {}
-        candidate = source.get('analysis_draft') if source.get('revision_id') == task['revision'] else None
-        return analysis_context(workspace, document, task['revision'], candidate=candidate, **arguments)
-    if tool == "beam_reference":
-        from .verification import beam_reference
-        return beam_reference(arguments)
-    if tool == "solver_validation":
-        from .verification import latest_evidence
-        return latest_evidence(workspace)
-    if tool == "preview_build":
-        return preview_build(workspace, project, arguments)
-    if tool == "build_geometry":
-        if workspace.revision(project, task["revision"])["document"]["geometry"] and not arguments.get("expected_impact_digest"):
-            raise ValueError("preview existing geometry changes before submitting a build")
-        return workspace.enqueue(project, arguments, "cad", fence=fence)
-    if tool == "solve":
-        if json.loads(task.get('config') or '{}').get('mode') == 'deepseek/1':
-            evidence = assess(workspace, project, task['revision'])
-            if evidence.get('evidence_job_id'):
-                return analysis_receipt(workspace.job(evidence['evidence_job_id']), reused=True)
-        return workspace.enqueue(project, arguments, "fea", fence=fence)
-    if tool == "configure_study":
-        def configure(db):
-            current = workspace._revision(db, project)
-            study = configure_study(workspace, current['document'], arguments['study'])
-            if packed(study) == packed(current['document'].get('study')):
-                return {**current, 'unchanged': True}
-            return workspace._commit(db, project, current['revision_id'], {**current['document'], 'study': study})
-        return workspace.command(project, arguments, configure, fence=fence)
-    if tool == "assessment":
-        return assess(workspace, project, task["revision"])
-    if tool == "search_sources":
-        return {"sources": search(workspace, project, arguments["query"])}
-    if tool == "remember":
-        from .engineering_memory import record
-        return record(workspace, project, arguments, fence=fence, authored_by="model")
-    if tool == 'set_modeling_requirements':
-        from .modeling import set_requirements
-        receipt = set_requirements(workspace, project, arguments, fence=fence)
-        return {'revision_id': receipt['revision_id'], 'requirement_count': len(arguments['requirements']),
-                'source_ids': sorted({source for item in arguments['requirements'] for source in item['source_ids']})}
-    if tool == 'check_modeling':
-        from .modeling import assess_geometry
-        return assess_geometry(workspace, project, task['revision'])
-    if tool == 'read_tool_result':
-        from .storage import Missing
-        from .task_memory import current_receipt
-        from .engineering_memory import lineage
+def _run_analysis_context(workspace, queries, task, arguments):
+    project = task['project']
+    from .analysis_context import analysis_context
+    document = workspace.revision(project, task['revision'])['document']
+    source = {}
+    if task.get('source'):
         with workspace.db() as db:
-            turn = db.execute('SELECT t.*,a.source AS task_source FROM agent_turns t JOIN agent_tasks a ON a.id=t.task '
-                              'WHERE t.id=? AND a.project=?', (arguments['turn_id'], project)).fetchone()
-            if not turn or not turn['response'] or turn['state'] == 'redacted':
-                raise Missing('tool result unavailable in this project')
-            rows = {row['id']: json.loads(row['payload']) for row in db.execute('SELECT id,payload FROM sources WHERE project=?', (project,))}
-            origin = next((key for key, value in rows.items() if value.get('task_id') == turn['task']
-                           and value.get('epoch') == turn['epoch'] and value.get('origin') != 'deleted'), turn['task_source'])
-            revision = workspace._revision(db, project, task['revision'])
-        response = json.loads(turn['response'])
-        receipt = current_receipt(rows, revision, response.get('tool'), json.loads(turn['receipt'] or '{}'))
-        saved_arguments = json.loads(turn['arguments']) if turn['arguments'] else response.get('arguments', {})
-        saved_arguments = {key: value for key, value in saved_arguments.items()
-                           if key not in ('command_id', 'idempotency_key', 'expected_head')}
-        if receipt.get('context_status') == 'source_no_longer_applicable':
-            saved_arguments = {}
-        text = packed({'tool': response.get('tool'), 'arguments': saved_arguments,
-                       'state': turn['state'], 'receipt': receipt, 'error': turn['error']})
-        source_ids = lineage(rows, [origin] + response.get('request', {}).get('source_ids', []) + receipt.get('source_ids', [])
-                             + [item['source_id'] for item in receipt.get('sources', [])]
-                             + ([receipt['source_id']] if receipt.get('source_id') else []))
-        offset, limit = arguments['offset'], arguments['limit']
-        return {'turn_id': turn['id'], 'revision_id': turn['revision'], 'epoch': turn['epoch'], 'source_ids': source_ids,
-                'offset': offset, 'total_characters': len(text), 'text': text[offset:offset + limit]}
-    if tool == "read_source":
-        from .engineering_memory import available, lineage
-        from .storage import Missing
-        with workspace.db() as db:
-            rows = {row["id"]: json.loads(row["payload"]) for row in db.execute("SELECT id,payload FROM sources WHERE project=?", (project,))}
-        source = arguments["source_id"]
-        if not available(rows, source):
-            raise Missing("source unavailable in this project")
-        value = rows[source]
-        text, offset, limit = value["text"], arguments["offset"], arguments["limit"]
-        return {"source_id": source, "source_ids": lineage(rows, [source]), "origin": value.get("origin"),
-            "revision_id": value.get("revision_id"), "offset": offset, "total_characters": len(text), "text": text[offset:offset + limit],
-            "meaning": value.get("meaning", "source statement, not numerical evidence")}
-    if tool == "ask_user":
-        return arguments
-    if tool == "finish":
-        from .modeling import completion
-        arguments = Finish.model_validate(arguments).model_dump()
-        result = completion(workspace, task, arguments)
-        return {**arguments, 'completion': result, 'source_ids': result['source_ids'],
-                "origin": "model_or_user_summary_not_numerical_evidence"}
-    if tool == "native_api":
-        return queries.native_api(arguments)
-    geometry = workspace.revision(project, task["revision"])["document"]["geometry"]
+            row = db.execute('SELECT payload FROM sources WHERE id=? AND project=?', (task['source'], project)).fetchone()
+        source = json.loads(row[0]) if row else {}
+    candidate = source.get('analysis_draft') if source.get('revision_id') == task['revision'] else None
+    return analysis_context(workspace, document, task['revision'], candidate=candidate, **arguments)
+
+def _run_beam_reference(workspace, queries, task, arguments):
+    from .verification import beam_reference
+    return beam_reference(arguments)
+
+def _run_solver_validation(workspace, queries, task, arguments):
+    from .verification import latest_evidence
+    return latest_evidence(workspace)
+
+def _run_preview_build(workspace, queries, task, arguments):
+    project = task['project']
+    return preview_build(workspace, project, arguments)
+
+def _run_build_geometry(workspace, queries, task, arguments):
+    project = task['project']
+    fence = (task['id'], task['epoch'])
+    if workspace.revision(project, task["revision"])["document"]["geometry"] and not arguments.get("expected_impact_digest"):
+        raise ValueError("preview existing geometry changes before submitting a build")
+    return workspace.enqueue(project, arguments, "cad", fence=fence)
+
+def _run_solve(workspace, queries, task, arguments):
+    project = task['project']
+    fence = (task['id'], task['epoch'])
+    if json.loads(task.get('config') or '{}').get('mode') == 'deepseek/1':
+        evidence = assess(workspace, project, task['revision'])
+        if evidence.get('evidence_job_id'):
+            return analysis_receipt(workspace.job(evidence['evidence_job_id']), reused=True)
+    return workspace.enqueue(project, arguments, "fea", fence=fence)
+
+def _run_configure_study(workspace, queries, task, arguments):
+    project = task['project']
+    fence = (task['id'], task['epoch'])
+    def configure(db):
+        current = workspace._revision(db, project)
+        study = configure_study(workspace, current['document'], arguments['study'])
+        if packed(study) == packed(current['document'].get('study')):
+            return {**current, 'unchanged': True}
+        return workspace._commit(db, project, current['revision_id'], {**current['document'], 'study': study})
+    return workspace.command(project, arguments, configure, fence=fence)
+
+def _run_assessment(workspace, queries, task, arguments):
+    project = task['project']
+    return assess(workspace, project, task["revision"])
+
+def _run_search_sources(workspace, queries, task, arguments):
+    project = task['project']
+    return {"sources": search(workspace, project, arguments["query"])}
+
+def _run_remember(workspace, queries, task, arguments):
+    project = task['project']
+    fence = (task['id'], task['epoch'])
+    from .engineering_memory import record
+    return record(workspace, project, arguments, fence=fence, authored_by="model")
+
+def _run_set_modeling_requirements(workspace, queries, task, arguments):
+    project = task['project']
+    fence = (task['id'], task['epoch'])
+    from .modeling import set_requirements
+    receipt = set_requirements(workspace, project, arguments, fence=fence)
+    return {'revision_id': receipt['revision_id'], 'requirement_count': len(arguments['requirements']),
+            'source_ids': sorted({source for item in arguments['requirements'] for source in item['source_ids']})}
+
+def _run_check_modeling(workspace, queries, task, arguments):
+    project = task['project']
+    from .modeling import assess_geometry
+    return assess_geometry(workspace, project, task['revision'])
+
+def _run_read_tool_result(workspace, queries, task, arguments):
+    project = task['project']
+    from .storage import Missing
+    from .task_memory import current_receipt
+    from .engineering_memory import lineage
+    with workspace.db() as db:
+        turn = db.execute('SELECT t.*,a.source AS task_source FROM agent_turns t JOIN agent_tasks a ON a.id=t.task '
+                          'WHERE t.id=? AND a.project=?', (arguments['turn_id'], project)).fetchone()
+        if not turn or not turn['response'] or turn['state'] == 'redacted':
+            raise Missing('tool result unavailable in this project')
+        rows = {row['id']: json.loads(row['payload']) for row in db.execute('SELECT id,payload FROM sources WHERE project=?', (project,))}
+        origin = next((key for key, value in rows.items() if value.get('task_id') == turn['task']
+                       and value.get('epoch') == turn['epoch'] and value.get('origin') != 'deleted'), turn['task_source'])
+        revision = workspace._revision(db, project, task['revision'])
+    response = json.loads(turn['response'])
+    receipt = current_receipt(rows, revision, response.get('tool'), json.loads(turn['receipt'] or '{}'))
+    saved_arguments = json.loads(turn['arguments']) if turn['arguments'] else response.get('arguments', {})
+    saved_arguments = {key: value for key, value in saved_arguments.items()
+                       if key not in ('command_id', 'idempotency_key', 'expected_head')}
+    if receipt.get('context_status') == 'source_no_longer_applicable':
+        saved_arguments = {}
+    text = packed({'tool': response.get('tool'), 'arguments': saved_arguments,
+                   'state': turn['state'], 'receipt': receipt, 'error': turn['error']})
+    source_ids = lineage(rows, [origin] + response.get('request', {}).get('source_ids', []) + receipt.get('source_ids', [])
+                         + [item['source_id'] for item in receipt.get('sources', [])]
+                         + ([receipt['source_id']] if receipt.get('source_id') else []))
+    offset, limit = arguments['offset'], arguments['limit']
+    return {'turn_id': turn['id'], 'revision_id': turn['revision'], 'epoch': turn['epoch'], 'source_ids': source_ids,
+            'offset': offset, 'total_characters': len(text), 'text': text[offset:offset + limit]}
+
+def _run_read_source(workspace, queries, task, arguments):
+    project = task['project']
+    from .engineering_memory import available, lineage
+    from .storage import Missing
+    with workspace.db() as db:
+        rows = {row["id"]: json.loads(row["payload"]) for row in db.execute("SELECT id,payload FROM sources WHERE project=?", (project,))}
+    source = arguments["source_id"]
+    if not available(rows, source):
+        raise Missing("source unavailable in this project")
+    value = rows[source]
+    text, offset, limit = value["text"], arguments["offset"], arguments["limit"]
+    return {"source_id": source, "source_ids": lineage(rows, [source]), "origin": value.get("origin"),
+        "revision_id": value.get("revision_id"), "offset": offset, "total_characters": len(text), "text": text[offset:offset + limit],
+        "meaning": value.get("meaning", "source statement, not numerical evidence")}
+
+def _run_ask_user(workspace, queries, task, arguments):
+    return arguments
+
+def _run_finish(workspace, queries, task, arguments):
+    from .modeling import completion
+    arguments = Finish.model_validate(arguments).model_dump()
+    result = completion(workspace, task, arguments)
+    return {**arguments, 'completion': result, 'source_ids': result['source_ids'],
+            "origin": "model_or_user_summary_not_numerical_evidence"}
+
+def _run_native_api(workspace, queries, task, arguments):
+    return queries.native_api(arguments)
+
+def _run_list_topology(workspace, queries, task, arguments):
+    geometry = _geometry(workspace, task)
+    manifest = workspace.artifacts.manifest(geometry)
+    entries = []
+    for body in manifest["bodies"]:
+        for kind, items in (("body", [body]), ("face", body["faces"]), ("edge", body.get("edges", []))):
+            for item in items:
+                if arguments["query"].lower() in (item["id"] + " " + kind + " " + body["name"]).lower():
+                    entries.append({"id": item["id"], "kind": kind, "body_name": body["name"],
+                        **{key: item[key] for key in ("bbox_mm", "area_mm2", "length_mm", "volume_mm3") if key in item}})
+    return {"artifact_id": geometry, "revision_id": task["revision"], "entries": entries[arguments["offset"]:arguments["offset"] + arguments["limit"]],
+            "total_matches": len(entries), "offset": arguments["offset"]}
+
+def _run_read_script(workspace, queries, task, arguments):
+    geometry = _geometry(workspace, task)
+    script = workspace.artifacts.file(geometry, "source.py").read_text(encoding="utf-8")
+    offset, limit = arguments["offset"], arguments["limit"]
+    return {"artifact_id": geometry, 'script_sha256':workspace.artifacts.manifest(geometry)['files']['source.py'],
+            "offset": offset, "total_characters": len(script), "text": script[offset:offset + limit]}
+
+def _run_register_code_module(workspace, queries, task, arguments):
+    from . import code_modules
+    return code_modules.register(workspace, task['project'], arguments, (task['id'], task['epoch']))
+
+def _run_search_code_modules(workspace, queries, task, arguments):
+    from . import code_modules
+    return code_modules.search(workspace, task['project'], arguments)
+
+def _run_read_code_module(workspace, queries, task, arguments):
+    from . import code_modules
+    return code_modules.read(workspace, task['project'], arguments)
+
+def _run_patch_code_module(workspace, queries, task, arguments):
+    from . import code_modules
+    return code_modules.patch_module(workspace, task['project'], arguments, (task['id'], task['epoch']))
+
+def _run_read_code_assembly(workspace, queries, task, arguments):
+    from . import code_modules
+    return code_modules.read_assembly(workspace, task['project'], arguments)
+
+
+def _geometry(workspace, task):
+    geometry = workspace.revision(task['project'], task['revision'])['document']['geometry']
     if not geometry:
-        raise ValueError("当前版本还没有几何模型，无法读取拓扑、测量或建模脚本；请先成功构建几何。查询 CAD 接口文档可使用 native_api。")
-    if tool == "list_topology":
-        manifest = workspace.artifacts.manifest(geometry)
-        entries = []
-        for body in manifest["bodies"]:
-            for kind, items in (("body", [body]), ("face", body["faces"]), ("edge", body.get("edges", []))):
-                for item in items:
-                    if arguments["query"].lower() in (item["id"] + " " + kind + " " + body["name"]).lower():
-                        entries.append({"id": item["id"], "kind": kind, "body_name": body["name"],
-                            **{key: item[key] for key in ("bbox_mm", "area_mm2", "length_mm", "volume_mm3") if key in item}})
-        return {"artifact_id": geometry, "revision_id": task["revision"], "entries": entries[arguments["offset"]:arguments["offset"] + arguments["limit"]],
-                "total_matches": len(entries), "offset": arguments["offset"]}
-    if tool == "read_script":
-        script = workspace.artifacts.file(geometry, "source.py").read_text(encoding="utf-8")
-        offset, limit = arguments["offset"], arguments["limit"]
-        return {"artifact_id": geometry, 'script_sha256':workspace.artifacts.manifest(geometry)['files']['source.py'],
-                "offset": offset, "total_characters": len(script), "text": script[offset:offset + limit]}
-    request = InspectGeometry(**arguments, revision_id=task["revision"], artifact_id=geometry)
-    result = queries.inspect(project, {**request.model_dump(exclude_none=True), 'metrics_only':True})
-    result.pop("visual")  # Display samples are not numerical evidence or task context.
+        raise ValueError('当前版本还没有几何模型，无法读取拓扑、测量或建模脚本；请先成功构建几何。查询 CAD 接口文档可使用 native_api。')
+    return geometry
+
+
+def _run_inspect_geometry(workspace, queries, task, arguments):
+    geometry = _geometry(workspace, task)
+    request = InspectGeometry(**arguments, revision_id=task['revision'], artifact_id=geometry)
+    result = queries.inspect(task['project'], {**request.model_dump(exclude_none=True), 'metrics_only': True})
+    result.pop('visual')
     return result
+
+
+@dataclass(frozen=True)
+class ToolDefinition:
+    model: type
+    description: str
+    handler: Callable
+    read_only: bool
+    resource: str
+    phases: tuple
+
+
+_DESCRIPTIONS = {"native_api": "Read installed CAD signatures. Batch up to 4 lookups with queries=[{query:'create_cylinder'},{query:'linear_sweep'}] in ONE call. Space or | separated keywords match alternatives. Functions and exact names rank first. Reuse cad_api_reference from context; do not query known signatures again. suggest_query is not a parameter.",
+                'register_code_module':'Register immutable Python for one reusable local-coordinate Brep in result. Declare parameter types/units/bounds, source IDs and optional requirement bindings. Syntax checked, not geometry verified. Code is stored outside dialogue. Modules receive u, parameters, params and declared dependency parts as copies.',
+                'search_code_modules':'Find project-scoped compatible module interfaces by tags, parameter names and text; semantic=true enables optional local reranking. Returns exact version references, no source code.',
+                'read_code_module':'Read a bounded source range of one exact module version. Do not reconstruct modules from historical prose.',
+                'patch_code_module':'Create a new immutable version from exact unique text replacements at code_revision; preserve the module contract and link new source IDs.',
+                'read_code_assembly':'Read a bounded slice or one component of the current exact assembly plan, including parameter and placement bindings. No Python code is replayed.',
+                "list_topology": "List current artifact's body/face/edge IDs, bounding boxes and geometric metrics; paginated. Use before querying unknown topology IDs.",
+                "inspect_geometry": "Measure explicit IDs from list_topology, or resolve a known point; this does not list or discover all topology.",
+                "analysis_context": "Read the current static-analysis scope, exact face IDs/bounds/areas, saved study, conflicts, supported physics and missing physical inputs. Call before planning a static study. Optional body_ids selects planning scope without saving it; paginate faces with offset/limit. No solver or model is run.",
+                "configure_study": "Configure material, fixed supports and total-force loads. face=x-min/x-max/y-min/y-max/z-min/z-max selects bounding faces; precise regions are optional.",
+                "preview_build": "Preview edits to existing geometry. Prefer parameters={existing_name:value}, or script_edits=[{old_text:'exact unique snippet',new_text:'replacement'}] with base_script_sha256 for local code changes; omit script/use_current/replay_of. Reuses saved code and original inputs; never guesses a replacement target. Read a bounded range if needed. Full script only for a full redesign. After preview call build_geometry({}).",
+                "assessment": "Read deterministic engineering evidence; missing evidence is unknown.",
+                "beam_reference": "Independent rectangular axial-bar or Euler-Bernoulli cantilever calculation. Explicit mm/N/MPa/kg inputs required; not a CAD-part simulation or certification.",
+                "solver_validation": "Read latest completed benchmark for the current solver implementation. Does not run a benchmark or certify the current part. Missing report means unknown.",
+                "remember": "Save a concise requirement, decision or open question grounded in source_ids from context. Use supersedes to explicitly replace old memory. Summaries are not solver evidence; never invent sources.",
+                "read_source": "Expand a retrieved source or historical tool receipt in bounded chunks. Verify its revision before using it as evidence.",
+                "read_tool_result": "Expand a saved tool instruction, receipt or failure by turn_id in bounded chunks. Latest observations provide this reference. Check revision and state before using it.",
+                "ask_user": "Pause for required missing information; never invent loads, material or constraints.",
+                'set_modeling_requirements': 'Register the complete current modeling requirements grounded in source_ids before a build. Preserve unchanged prior requirements. Numeric min/max bounds use actual global bbox dimensions in mm, volume in mm3, or body counts. Record unsupported shape/assembly features as metric=manual; never omit them or invent numerical targets.',
+                'check_modeling': 'Check the current artifact against registered modeling requirements. Manual features remain unknown. This does not verify unregistered features, overall shape, or structural safety.',
+                "finish": "End the reply. outcome=answer for discussion; built for constructed geometry without full checks, partial for incomplete geometry, verified only when all registered checks pass. Include remaining limitations in summary. Backend validates against current geometry; it is not engineering certification."}
+
+_MODELING_ONLY = frozenset(('native_api', 'read_script', 'preview_build', 'build_geometry',
+    'set_modeling_requirements', 'check_modeling', 'register_code_module', 'search_code_modules',
+    'read_code_module', 'patch_code_module', 'read_code_assembly'))
+_EXCLUSIVE = frozenset(('preview_build', 'build_geometry', 'configure_study', 'solve', 'remember',
+    'set_modeling_requirements', 'register_code_module', 'patch_code_module', 'ask_user', 'finish'))
+_RESOURCES = {'native_api': 'query', 'inspect_geometry': 'query', 'build_geometry': 'native-job',
+              'solve': 'native-job', 'search_sources': 'retrieval', 'search_code_modules': 'retrieval'}
+_HANDLERS = {
+    'preview_build': _run_preview_build,
+    'build_geometry': _run_build_geometry,
+    'configure_study': _run_configure_study,
+    'solve': _run_solve,
+    'assessment': _run_assessment,
+    'analysis_context': _run_analysis_context,
+    'beam_reference': _run_beam_reference,
+    'solver_validation': _run_solver_validation,
+    'search_sources': _run_search_sources,
+    'remember': _run_remember,
+    'ask_user': _run_ask_user,
+    'read_source': _run_read_source,
+    'read_tool_result': _run_read_tool_result,
+    'read_script': _run_read_script,
+    'inspect_geometry': _run_inspect_geometry,
+    'list_topology': _run_list_topology,
+    'native_api': _run_native_api,
+    'finish': _run_finish,
+    'set_modeling_requirements': _run_set_modeling_requirements,
+    'check_modeling': _run_check_modeling,
+    'register_code_module': _run_register_code_module,
+    'search_code_modules': _run_search_code_modules,
+    'read_code_module': _run_read_code_module,
+    'patch_code_module': _run_patch_code_module,
+    'read_code_assembly': _run_read_code_assembly,
+}
+if _HANDLERS.keys() != _PARAMETER_MODELS.keys():
+    raise ValueError('tool models and handlers must declare the same capabilities')
+TOOL_REGISTRY = MappingProxyType({name: ToolDefinition(model, _DESCRIPTIONS.get(name, name), _HANDLERS[name],
+    name not in _EXCLUSIVE, _RESOURCES.get(name, 'workspace'),
+    ('modeling',) if name in _MODELING_ONLY else ('modeling', 'analysis'))
+    for name, model in _PARAMETER_MODELS.items()})
+# Compatibility for existing typed callers; definitions above own the selection.
+TOOL_MODELS = MappingProxyType({name: definition.model for name, definition in TOOL_REGISTRY.items()})
+
+
+def execute(workspace, queries, task, tool, arguments):
+    definition = TOOL_REGISTRY.get(tool)
+    if definition is None:
+        raise ValueError('unknown task tool')
+    return definition.handler(workspace, queries, task, arguments)

@@ -9,7 +9,7 @@ import httpx
 
 from .contracts import TaskStep
 from .storage import packed
-from .task_tools import tool_schemas
+from .task_tools import tool_schemas, TOOL_REGISTRY
 
 URL = "https://api.deepseek.com/chat/completions"
 MODELS = ("deepseek-flash", "deepseek-v4-pro")
@@ -93,9 +93,7 @@ def payload(compiled, model):
     setup = compiled.get('analysis_setup') or {}
     analyzing = compiled.get('workflow_phase') == 'analysis' or bool(compiled.get('analysis_candidate')) or bool(setup)
     if analyzing:
-        excluded = {'native_api', 'read_script', 'preview_build', 'build_geometry', 'set_modeling_requirements', 'check_modeling',
-                    'register_code_module', 'search_code_modules', 'read_code_module', 'patch_code_module', 'read_code_assembly'}
-        tools = [tool for tool in tools if tool['function']['name'] not in excluded]
+        tools = [tool for tool in tools if 'analysis' in TOOL_REGISTRY[tool['function']['name']].phases]
     module_mode=bool((compiled.get('task_focus') or {}).get('module_catalog') or (compiled.get('task_focus') or {}).get('module_assembly_reference')
                      or (compiled.get('task_focus') or {}).get('failed_modules')) or len(compiled.get('project',{}).get('modeling_plan',[]))>=2
     module_tools={'register_code_module','search_code_modules','read_code_module','patch_code_module','read_code_assembly'}
