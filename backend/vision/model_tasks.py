@@ -208,6 +208,8 @@ def prepare_request(runner, task, turns, config):
 def next_step(runner, task, turns, config):
     io = getattr(runner, 'model_io', None)
     if io is not None and not io.available():
+        if io.closing or io.failure:
+            raise ValueError('model I/O unavailable; no automatic retry, submit a correction after recovery')
         return None
     prepared = prepare_request(runner, task, turns, config)
     if io is not None:

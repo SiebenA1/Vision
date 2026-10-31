@@ -1,6 +1,6 @@
 # VISION 综合架构与性能优化设计方案
 
-版本：v2；日期：2026-10-31；状态：设计，未实施运行时代码改造。
+版本：v2；日期：2026-10-31；状态：分批实施中，实际落地与验证见 [实施进度](optimization-progress.md)。各章节仍用于说明目标、边界和验收要求，不能代替实际验收记录。
 
 本方案合并 DeepSeek Harness 架构评估与“一切皆插件”讨论，作为后续实施依据。上游机制、源码出处和历史验证记录保留在 [架构评估](deepseek-harness-evaluation.md) 与 [验证证据](deepseek-harness-evidence.json)。
 

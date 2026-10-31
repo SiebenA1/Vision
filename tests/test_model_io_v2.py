@@ -3,6 +3,7 @@ import asyncio
 import threading
 import time
 import unittest
+from unittest.mock import patch
 
 from backend.vision.model_io import ModelIO, RequestCancelled
 import test_model_tasks_v2 as fixtures
@@ -12,6 +13,15 @@ response = fixtures.response
 
 
 class ModelIOTest(unittest.TestCase):
+    def test_startup_failure_releases_thread(self):
+        io = ModelIO()
+        with patch('backend.vision.model_io.provider.client', side_effect=RuntimeError('startup failure')):
+            with self.assertRaises(RuntimeError):
+                io.start()
+            io.close()
+        self.assertFalse(io.thread.is_alive())
+        self.assertFalse(io.requests)
+
     def test_capacity_cancellation_cleanup_and_shared_client(self):
         entered, cleaned = threading.Event(), threading.Event()
         clients = []
@@ -133,6 +143,8 @@ class AsyncModelTaskTest(unittest.TestCase):
         request = value['steps'][0]['response']['request']
         self.assertGreater(request['payload_bytes'], 0)
         self.assertIn('context', request['timings_ms'])
+        self.assertGreaterEqual(value['steps'][0]['response']['execution']['duration_ms'], 0)
+        self.assertEqual(value['steps'][0]['response']['execution']['resource'], 'workspace')
         with self.tasks.workspace.db() as db:
             self.assertEqual(db.execute('SELECT count(*) FROM context_snapshots').fetchone()[0], 1)
 
@@ -182,3 +194,30 @@ class AsyncModelTaskTest(unittest.TestCase):
         value = self.tasks.get(task)
         self.assertEqual(value['state'], 'waiting_user')
         self.assertIn('outcome may be unknown', value['error'])
+
+    def test_transport_failure_is_metered_and_not_reissued(self):
+        calls = []
+
+        async def transport(payload, client):
+            calls.append(payload)
+            raise ValueError('controlled failure; no automatic retry')
+
+        self.start_io(transport)
+        task = self.create()
+        value = self.advance_until(task, 'waiting_user')
+        self.tasks.step(task)
+        self.assertEqual(len(calls), 1)
+        execution = value['steps'][0]['response']['execution']
+        self.assertEqual(execution['outcome'], 'failed')
+        self.assertGreaterEqual(execution['model_duration_ms'], 0)
+
+    def test_closed_service_pauses_instead_of_waiting_forever(self):
+        async def transport(payload, client):
+            self.fail('closed service transmitted a request')
+
+        self.start_io(transport)
+        self.tasks.model_io.close()
+        task = self.create()
+        self.tasks.step(task)
+        self.assertEqual(self.tasks.get(task)['state'], 'waiting_user')
+        self.assertIn('model I/O unavailable', self.tasks.get(task)['error'])

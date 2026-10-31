@@ -7,11 +7,11 @@ import time
 
 from .storage import Conflict, Missing, identity, packed
 from .task_memory import context
-from .task_tools import analysis_receipt, execute, prepare
+from .task_tools import analysis_receipt, execute, prepare, TOOL_REGISTRY
 from .queries import QueryUnavailable
 from . import model_tasks
 from .engineering_memory import parents, checkpoint
-from .model_io import ModelIO
+from .model_io import ModelIO, RequestCancelled
 
 ACTIVE = ("created", "executing", "waiting_job")
 
@@ -79,7 +79,7 @@ class Tasks:
                 turn[key] = json.loads(turn[key]) if turn[key] else None
             turn.pop("arguments", None)
             if turn["response"]:
-                turn["response"] = {key: turn["response"][key] for key in ("tool", "provider", "request") if key in turn["response"]}
+                turn["response"] = {key: turn["response"][key] for key in ("tool", "provider", "request", "execution") if key in turn["response"]}
         value["steps"] = turns if include_steps else []
         return value
 
@@ -250,9 +250,14 @@ class Tasks:
 
     def loop(self):
         while not self.stop.is_set():
-            self.reconcile_requests()
-            with self.workspace.db() as db:
-                ids = [row[0] for row in db.execute("SELECT id FROM agent_tasks WHERE state IN ('created','executing','waiting_job') ORDER BY created LIMIT 8")]
+            try:
+                self.reconcile_requests()
+                with self.workspace.db() as db:
+                    ids = [row[0] for row in db.execute("SELECT id FROM agent_tasks WHERE state IN ('created','executing','waiting_job') ORDER BY created LIMIT 8")]
+            except Exception:
+                logging.exception('task scheduling snapshot failed; retrying reconciliation')
+                self.stop.wait(.2)
+                continue
             if ids:
                 offset = self.schedule_cursor % len(ids)
                 ids = ids[offset:] + ids[:offset]
@@ -311,6 +316,13 @@ class Tasks:
                     return
                 del self.model_requests[pending['id']]
                 if result.error:
+                    with self.workspace.db() as db:
+                        current = self.row(db, task_id)
+                        if current['epoch'] == epoch and current['state'] == 'executing':
+                            response = json.loads(pending['response'])
+                            response['execution'] = {'model_duration_ms': result.duration_ms,
+                                                     'outcome': 'cancelled' if isinstance(result.error, RequestCancelled) else 'failed'}
+                            db.execute('UPDATE agent_turns SET response=? WHERE id=?', (packed(response), pending['id']))
                     raise result.error
                 task, turns, config = (prepared[key] for key in ('task', 'turns', 'config'))
                 pending = model_tasks.settle_request(self, prepared, result.response, result.duration_ms)
@@ -343,6 +355,7 @@ class Tasks:
                             task["revision"], "executing", pending["response"], pending["arguments"], None, None, None, time.time()))
                         db.execute("UPDATE agent_tasks SET turns=turns+1,updated=? WHERE id=?", (time.time(), task_id))
             tool = json.loads(pending["response"])["tool"]
+            execution = None
             if pending["state"] == "waiting_job":
                 job = self.workspace.job(pending["job"])
                 if job["state"] in ("queued", "running", "cancelling"):
@@ -388,12 +401,18 @@ class Tasks:
                 current, _ = self.snapshot(task_id)
                 if current["epoch"] != epoch or current["state"] != "executing":
                     return
+                started = time.monotonic()
                 receipt = execute(self.workspace, self.queries, task, tool, json.loads(pending["arguments"]))
+                execution = {'duration_ms': round((time.monotonic() - started) * 1000, 3),
+                             'resource': TOOL_REGISTRY[tool].resource}
                 revision = receipt.get("revision_id", task["revision"]) if tool in ("configure_study", 'set_modeling_requirements') else task["revision"]
             with self.workspace.db() as db:
                 current = self.row(db, task_id)
                 if current["epoch"] != epoch or current["state"] not in ("executing", "waiting_job"):
                     return
+                if execution is not None:
+                    response = {**json.loads(pending['response']), 'execution': execution}
+                    db.execute('UPDATE agent_turns SET response=? WHERE id=?', (packed(response), pending['id']))
                 if tool == 'finish' and self.workspace._revision(db, task['project'])['revision_id'] != revision:
                     raise Conflict('project changed before finish checkpoint')
                 if tool in ("search_sources", "read_source", "read_tool_result", 'set_modeling_requirements', 'check_modeling', 'finish',

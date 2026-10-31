@@ -17,6 +17,8 @@
 | `storage.py`、`changes.py`、`project_management.py`、`bundles.py` | SQLite、不可变版本、工程管理与归档 |
 | `jobs.py`、`processes.py`、`native.py` | 作业调度、进程生命周期与原生计算适配 |
 | `conversation.py`、`tasks.py`、`model_tasks.py`、`task_tools.py` | 对话和任务执行 |
+| `model_io.py`、`tool_admission.py` | 有界异步模型请求、取消排空、每步不可变工具准入 |
+| `prompts.py`、`read_batch.py` | 阶段提示贡献和逐项持久化的有界只读批次 |
 | `engineering_memory.py`、`task_memory.py`、`retrieval.py` | 工程记忆和检索 |
 | `studies.py`、`assessment.py`、`verification.py`、`benchmarks.py` | 工况、评估与求解校核 |
 
@@ -40,6 +42,8 @@
   脚本对话框与 CAE 页面；任务状态机由 Python 回归覆盖。
 
 ## 检查入口
+
+架构优化各批次的实际变更与定向检查见 [实施进度](optimization-progress.md)。生产模型请求由独立 I/O 服务等待，协调器继续推进其他项目；手动离线单步入口共用请求准备与结算逻辑。
 
 前端运行 `npm test`、`npm run build`；持久化工程后端运行
 `.python313/python.exe -m unittest discover -s tests -p "test_*v2.py"`。

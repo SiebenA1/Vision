@@ -143,6 +143,16 @@ See [development status](../docs/development-status.md) for remaining acceptance
 The process boundary manages resources; CAD scripts still execute trusted local
 Python and are not an untrusted-code sandbox.
 
+The background task runner owns a bounded asynchronous model I/O service (two
+in-flight requests per workspace). HTTP connections share that service's event
+loop; task corrections, cancellation and shutdown cancel and drain its requests.
+Other projects continue while a model waits. Interrupted/unknown requests remain
+paused rather than being replayed. Tools use a static typed registry and a
+step-owned admission snapshot; this does not introduce Cordis or dynamic plugins.
+`read_batch` supports up to four independent bounded reads, with child checkpoints
+inside the existing turn receipt. See [optimization progress](../docs/optimization-progress.md)
+for implemented scope, measurements and targeted validation.
+
 New v2 solves now publish `surface.bin` with indexed FEM boundary triangles,
 displacement and nodal-averaged stress, plus boundary indices in `field.npz`.
 The workbench renders displacement/stress and explicit deformation scaling,
